@@ -156,11 +156,12 @@ class ContextManager:
 
     # ------------------------------------------------------------------
 
-    def append(self, e: Entry) -> None:
+    def append(self, e: Entry) -> Entry:
         self.entries.append(e)
         self._rolling_fold()                 # 主要机制：每一步都做
         if self.usage_ratio() >= self.emergency_at:
             self._emergency_compact()        # 兜底机制
+        return e
 
     def used_tokens(self) -> int:
         return sum(e.tokens for e in self.entries)
@@ -238,6 +239,15 @@ class ContextManager:
             turns.append(cur)
         return turns
 
+    def force_compact(self) -> None:
+        """无条件压一次，不看占用率。
+
+        给一种情况用：**服务端说超窗了，而本地估算说没有**。
+        本地 token 估算和真实分词器永远有出入，所以「按比例触发」这条路
+        一定会有漏网的时候。这时唯一还能做的就是不问比例、直接压。
+        """
+        self._emergency_compact()
+
     def _emergency_compact(self) -> None:
         before = self.used_tokens()
         turns = self._turns()
@@ -304,17 +314,23 @@ class ContextManager:
     # ------------------------------------------------------------------
 
     def note(self, text: str, filename: str = "notes.md") -> Entry:
-        """把内容写到上下文之外，上下文里只留一行指针。"""
+        """把内容写到上下文之外，上下文里只留一行指针。
+
+        ⚠️ 这个方法**自己**把条目挂进上下文，而不是返回一个让调用方挂的
+        Entry。原来是后者，而全仓库没有一个调用点——也就是说
+        「外化」这条第 3 章反复讲的技术，在参考实现里其实没有接线。
+        写完不挂进去，等于写了个日志文件。
+        """
         path = self.workspace / filename
         with path.open("a", encoding="utf-8") as f:
             f.write(text.rstrip() + "\n")
-        return Entry(
+        return self.append(Entry(
             role="user",
             content=f"[已记录到 {path}]",
             kind="note",
             step=self.step,
             retrieval_key=str(path),
-        )
+        ))
 
     def stash(self, content: str, name: str) -> str:
         """把一段过大的内容落盘，返回取回的钥匙。
@@ -340,9 +356,14 @@ class ContextManager:
         # 旧的复诵条目要移除，否则会累积多份计划互相打架
         self.entries = [e for e in self.entries if e.kind != "note"
                         or not e.content.startswith("当前进度")]
-        return Entry(
+        # ⚠️ 必须 append。原来这里是 return 一个没挂进去的 Entry——
+        # 于是 recite() 只做了上面那半句「删掉旧的进度」，
+        # 调用它比不调用更糟：计划被删了，新的一份从没进过上下文。
+        # 复述的全部意义就是**把计划重新放到上下文末尾**，
+        # 少了这一步，剩下的都是无用功。
+        return self.append(Entry(
             role="user", content=f"当前进度：\n{body}", kind="note", step=self.step
-        )
+        ))
 
     # ------------------------------------------------------------------
 

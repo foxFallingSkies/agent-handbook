@@ -135,6 +135,16 @@ class ToolRegistry:
     def register(self, spec: ToolSpec) -> None:
         self.tools[spec.name] = spec
 
+    def is_retry_safe(self, name: str) -> bool:
+        """这个工具失败后能不能直接重试？
+
+        `idempotent=False` 的工具重试一次就多一个副作用——
+        开工单的那个工具重试三次，客户就收到三次上门取件电话。
+        编排层要读这个字段，而不是对所有失败一视同仁地重试。
+        """
+        spec = self.tools.get(name)
+        return bool(spec and spec.idempotent)
+
     def api_tools(self) -> list[dict]:
         """给模型的工具定义。**顺序稳定**——否则会破坏 KV-cache 前缀。"""
         return [self.tools[n].to_api() for n in sorted(self.tools)]
@@ -214,6 +224,20 @@ class ToolRegistry:
         text = result if isinstance(result, str) else json.dumps(
             result, ensure_ascii=False, sort_keys=True
         )
+
+        # ⚠️ 最后一道兜底。工具**应该**自己分页（见 truncate_items），
+        # 但总有一天会有人接一个返回整张表的新工具。
+        # 一次超长的工具返回能一口气吃掉半个上下文窗口，
+        # 而这种事发生在生产里、发生在半夜、发生在你没加分页的那个工具上。
+        from .. import tokens as _tk
+        if _tk.estimate(text) > self.max_response_tokens:
+            keep = self.max_response_tokens * 4      # 粗略换算回字符
+            text = (
+                text[:keep]
+                + f"\n\n[结果过长已被截断：完整内容约 {_tk.estimate(text)} tokens，"
+                  f"超过单次工具返回上限 {self.max_response_tokens}。"
+                  f"请缩小查询范围后重试——例如加上时间区间或关键词过滤。]"
+            )
         return ToolResult(text, is_error=False)
 
     # ------------------------------------------------------------------

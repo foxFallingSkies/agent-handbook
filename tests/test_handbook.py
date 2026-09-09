@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import asyncio
+from pathlib import Path
 import pytest
 
 from handbook import LLM, Agent, Budget, ScriptedTransport, Trace
@@ -355,3 +357,107 @@ async def test_end_to_end_email_is_verified_against_the_environment():
     assert "get_policy" in names, "保修口径必须来自政策，不能自己编"
     assert names.index("check_warranty") < names.index("create_repair_ticket"), \
         "保修判定必须发生在开工单之前，否则工单上的 warranty_claim 是猜的"
+
+
+# ------------------------------------------------- 声明了就得有人用
+
+def test_oversized_tool_result_is_truncated_with_a_way_out():
+    """§4.4：单次工具返回有硬上限，且截断提示要说明怎么缩小范围。
+
+    ⚠️ `max_response_tokens` 曾经是个只在构造函数里出现、
+    再也没被读过的字段。声明一个上限却不执行它，比没有上限更糟——
+    因为看代码的人会以为有人在守着。
+    """
+    from handbook.tools import ToolRegistry, ToolSpec
+
+    reg = ToolRegistry(max_response_tokens=50)
+    reg.register(ToolSpec(
+        name="dump_everything", description="返回一整张表",
+        parameters={"type": "object", "properties": {}},
+        fn=lambda: "行" * 5000,
+    ))
+    out = reg.call("dump_everything", {})
+    assert not out.is_error                       # 截断不是错误
+    assert len(out.text) < 5000
+    assert "截断" in out.text
+    assert "缩小查询范围" in out.text              # 给出下一步，不是只说"太长了"
+
+
+def test_non_idempotent_tools_are_marked_unsafe_to_retry():
+    """§4.6：重试一个非幂等工具 = 多一份副作用。"""
+    shop = Shop()
+    reg, _ = build_registry(shop, CUSTOMER)
+    assert reg.is_retry_safe("search_orders") is True
+    assert reg.is_retry_safe("create_repair_ticket") is False   # 重试就多一张工单
+    assert reg.is_retry_safe("不存在的工具") is False
+
+
+def test_cache_breakpoint_limit_is_checked_locally():
+    """§2.5：缓存断点最多 4 个，超了 API 直接 400。
+
+    离线模式永远不会暴露这个错——它只会在第一次真实调用时炸。
+    所以在本地数一遍。
+    """
+    from handbook.errors import BadRequestError
+    from handbook.transport import Request, _build_tools  # noqa: F401
+
+    tools = [{"name": f"t{i}", "cache_control": {"type": "ephemeral"}}
+             for i in range(4)]
+    req = Request(model="m", system="s", tools=tools, messages=[],
+                  cache_system=True, cache_tools=False)
+    with pytest.raises(BadRequestError):
+        _build_tools(req)                          # 4 个工具断点 + 1 个 system = 5
+
+
+def test_scripted_transport_does_not_mutate_the_shared_script():
+    """测试夹具里的共享可变状态：第二个测试会拿到第一个测试的用量。
+
+    这类污染最阴险的地方是它看起来像「代码有随机性」，
+    而实际上只是测试顺序变了。
+    """
+    from handbook.transport import Request
+
+    script = [Response(text="ok", stop_reason="end_turn", usage=Usage(output_tokens=5))]
+    before = script[0].usage.input_tokens
+
+    async def _run():
+        for _ in range(2):
+            t = ScriptedTransport(list(script))
+            await t.send(Request(model="m", system="s" * 4000, tools=[],
+                                 messages=[{"role": "user", "content": "hi"}]))
+    asyncio.run(_run())
+    assert script[0].usage.input_tokens == before
+
+
+def test_notes_and_recitation_are_usable_api():
+    """§3.7 外置记事本 / §3.9 复述待办——两个第 3 章反复讲的技术。"""
+    ctx = ContextManager(workspace="workspace/_test_notes")
+    n = ctx.note("客户声称的延保承诺已在 2026-08-06 的对话里核实")
+    assert n.retrieval_key                          # 记事本必须留得下钥匙
+    assert Path(n.retrieval_key).exists()
+
+    r = ctx.recite([("查订单", True), ("查保修", True), ("开工单", False)])
+    assert "开工单" in r.content
+    # 复述的意义在于把还没做的事**重新推到上下文末尾**
+    assert ctx.entries[-1] is r
+
+
+def test_capability_can_be_narrowed_after_reading_untrusted_content():
+    """§11：读了不可信内容之后收窄可用工具集。
+
+    遮蔽而不是删除——工具定义留在上下文里，KV-cache 前缀才不会作废。
+    """
+    shop = Shop()
+    reg, _ = build_registry(shop, CUSTOMER)
+    agent = Agent(llm=LLM(ScriptedTransport([])), registry=reg, system="s")
+
+    agent.allow_only({"search_orders", "get_policy"})
+    out = reg.call("create_repair_ticket",
+                   {"order": "order-0803", "symptom": "x", "warranty_claim": True},
+                   allowed=agent._allowed)
+    assert out.is_error
+    assert "不可用" in out.text
+    assert "search_orders" in out.text              # 告诉它现在能用什么
+    assert shop.tickets == []
+    # 定义仍在，前缀没变
+    assert "create_repair_ticket" in [t["name"] for t in reg.api_tools()]

@@ -19,12 +19,14 @@ from typing import Any, Awaitable, Callable
 from .context import ContextManager, Entry
 from .errors import (
     ConfirmationRequired,
+    ContextOverflowError,
     NoProgress,
     StepBudgetExceeded,
     TokenBudgetExceeded,
     ToolError,
 )
 from .llm import LLM, Tier
+from .transport import CACHE_TTL_SECONDS
 from .tools import ToolRegistry
 from .trace import Trace
 
@@ -97,6 +99,7 @@ class Agent:
 
         # 闸门用的状态
         self._recent_calls: list[str] = []
+        self._last_call_at: float | None = None
         self._state_hashes: list[str] = []
         self._allowed: set[str] | None = None      # None = 全部可用
         self._confirmed: set[str] = set()
@@ -161,12 +164,35 @@ class Agent:
             with tr.span(f"step {step}", "step") as step_span:
                 # ---- 调模型 ----
                 with tr.span("llm_call", "llm_call", step_span) as ls:
-                    resp = await self.llm.call(
-                        system=self.system,
-                        messages=self.ctx.to_messages(),
-                        tools=self.registry.api_tools(),
-                        tier=self.tier,
-                    )
+                    # 上一次调用离现在太久，前缀缓存已经过期——
+                    # 这一次要按写入价重新建缓存。埋点记下来，
+                    # 否则成本报表里只会看到"某几步突然变贵"而找不到原因。
+                    if self._last_call_at is not None:
+                        gap = time.perf_counter() - self._last_call_at
+                        if gap > CACHE_TTL_SECONDS:
+                            ls.attrs["cache_likely_expired_after_s"] = round(gap, 1)
+                    self._last_call_at = time.perf_counter()
+
+                    try:
+                        resp = await self.llm.call(
+                            system=self.system,
+                            messages=self.ctx.to_messages(),
+                            tools=self.registry.api_tools(),
+                            tier=self.tier,
+                        )
+                    except ContextOverflowError:
+                        # 服务端说超窗了。本地的估算显然低估了——
+                        # 估算器和真实分词器不是一回事，这条路径迟早会走到。
+                        # 正确处置是**压缩后重试一次**，而不是把异常抛给调用方：
+                        # 抛出去，调用方能做的也只有压缩后重试。
+                        ls.attrs["context_overflow_recovered"] = True
+                        self.ctx.force_compact()
+                        resp = await self.llm.call(
+                            system=self.system,
+                            messages=self.ctx.to_messages(),
+                            tools=self.registry.api_tools(),
+                            tier=self.tier,
+                        )
                     ls.attrs.update(
                         input_tokens=resp.usage.input_tokens,
                         cache_read=resp.usage.cache_read_input_tokens,

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -190,13 +191,24 @@ def _build_tools(req: Request) -> list[dict]:
     tools = [dict(t) for t in req.tools]
     if req.cache_tools:
         tools[-1]["cache_control"] = {"type": "ephemeral"}
+
+    # ⚠️ 断点上限是 API 的硬约束，超了直接 400。
+    # 在本地数一遍，因为这个错误在离线模式下永远不会出现——
+    # 它只会在第一次真实调用时炸，而那时你正在演示。
+    used = sum(1 for t in tools if "cache_control" in t)
+    used += 1 if req.cache_system else 0
+    if used > CACHE_MAX_BREAKPOINTS:
+        raise BadRequestError(
+            f"标了 {used} 个缓存断点，超过上限 {CACHE_MAX_BREAKPOINTS}。",
+        )
     return tools
 
 
 class AnthropicTransport:
     """真实调用。"""
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None,
+                 timeout_seconds: float = 120.0):
         try:
             from anthropic import AsyncAnthropic
         except ImportError as e:  # pragma: no cover
@@ -214,6 +226,11 @@ class AnthropicTransport:
         url = base_url or os.environ.get("ANTHROPIC_BASE_URL")
         if url:
             kwargs["base_url"] = url
+        # ⚠️ 单次调用的硬超时。
+        # Budget.max_seconds 是**步与步之间**检查的，管不到一次卡死的调用；
+        # 没有这一条，一个不返回的连接能让 agent 永远停在第 3 步，
+        # 而所有预算闸都以为一切正常。
+        self.timeout_seconds = timeout_seconds
         self._client = AsyncAnthropic(**kwargs)
 
     async def send(self, req: Request) -> Response:
@@ -228,14 +245,22 @@ class AnthropicTransport:
 
         t0 = time.perf_counter()
         try:
-            msg = await self._client.messages.create(
-                model=req.model,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-                system=_build_system_blocks(req),
-                tools=_build_tools(req) or None,
-                messages=req.messages,
+            msg = await asyncio.wait_for(
+                self._client.messages.create(
+                    model=req.model,
+                    max_tokens=req.max_tokens,
+                    temperature=req.temperature,
+                    system=_build_system_blocks(req),
+                    tools=_build_tools(req) or None,
+                    messages=req.messages,
+                ),
+                timeout=self.timeout_seconds,
             )
+        except asyncio.TimeoutError as e:
+            # 归到 ServerError：超时是可重试的，和 4xx 不同类
+            raise ServerError(
+                f"调用超过 {self.timeout_seconds}s 未返回。"
+            ) from e
         except SDKRateLimit as e:
             retry_after = None
             headers = getattr(getattr(e, "response", None), "headers", {}) or {}
@@ -377,7 +402,14 @@ class ScriptedTransport:
                 "说明 agent 走的步数比脚本预期的多——去看 trace 找出多出来的那一步。"
             )
         await asyncio.sleep(0)     # 让出事件循环，暴露并发问题
-        resp = self._responses.pop(0)
+
+        # ⚠️ 深拷贝，不是 pop 出来直接用。
+        # 调用方常写 ScriptedTransport(SCRIPT)，SCRIPT 是模块级常量；
+        # 下面要往 resp.usage 里回填估算的 token 数，直接改就会污染
+        # 那份常量——于是第二个测试拿到的是第一个测试算出来的用量，
+        # 而且顺序一变结论就变。共享可变状态在测试夹具里尤其阴险，
+        # 因为「测试互相污染」看起来往往像「代码有随机性」。
+        resp = copy.deepcopy(self._responses.pop(0))
 
         if self.estimate_usage:
             from . import tokens as tk
