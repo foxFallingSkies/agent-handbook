@@ -151,7 +151,7 @@ class ContextManager:
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
 
-        # 埋点：这些数据是验证本章策略是否有效的唯一依据（第 10 章会消费它）
+        # 埋点：这些数据是验证本章策略是否有效的唯一依据（第 9 章会消费它）
         self.events: list[dict] = []
 
     # ------------------------------------------------------------------

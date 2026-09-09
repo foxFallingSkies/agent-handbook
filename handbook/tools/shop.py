@@ -29,7 +29,7 @@ class Shop:
     """一个虚构的电商后端。
 
     它同时扮演两个角色：工具的数据源，以及评测时的环境状态检查点——
-    第 9 章要验证的 outcome 不是 agent 说了什么，而是这里的状态变成了什么。
+    第 8 章要验证的 outcome 不是 agent 说了什么，而是这里的状态变成了什么。
     """
 
     def __init__(self, path: Path = DATA_PATH):
@@ -53,7 +53,7 @@ class Shop:
 
 
 # 工具描述单独定义。它们是写给模型看的 prompt，值得和主 prompt 一样的投入，
-# 放在这里也便于第 9 章拿它们做 A/B 对照。
+# 放在这里也便于第 8 章拿它们做 A/B 对照。
 DESC_SEARCH_ORDERS = (
     "搜索当前客户的订单。返回订单编号、下单与签收日期、状态、金额，"
     "以及每件商品的名称、品类和标准保修月数——足以判断「是哪一单」，"
@@ -330,7 +330,7 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
             "warranty_claim": warranty_claim,
             "created_at": shop.today.isoformat(),
         }
-        shop.tickets.append(ticket)      # ← 真实副作用，第 9 章检查的就是它
+        shop.tickets.append(ticket)      # ← 真实副作用，第 8 章检查的就是它
         return json.dumps(
             {"created": True, "ticket_id": ticket["id"],
              "next": "已安排上门取件，检测周期 3-5 个工作日。"},

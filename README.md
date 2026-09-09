@@ -87,12 +87,13 @@ python -m examples.ch01_email          # 不需要 API key
 | `llm.py` | 第 2 章 | 结构化输出的自修链（回传**字段级**校验错误）、按异常类型分流的重试、模型分级路由、成本报表 |
 | `context.py` | 第 3 章 | **滚动折叠**为主 + 阈值压缩兜底；带「取回钥匙」的内容折叠是无损的；失败记录永不折叠 |
 | `tools/` | 第 4 章 | 错误消息是 prompt；语义化 ID；风险分级；**遮蔽而非删除**；参数校验即防呆 |
-| `loop.py` | 第 6 章 | 五道闸（终止/预算/漂移/抖动/去重）；人工确认是显式重入 |
-| `trace.py` | 第 10 章 | span 树，**压缩事件也是 span** |
-| `evals/` | 第 9 章 | golden set + pass@k / pass^k + 环境状态断言 |
+| `loop.py` | 第 5 章 | 五道闸（终止/预算/漂移/抖动/去重）；人工确认是显式重入 |
+| `memory.py` | 第 7 章 | Anthropic `memory_20250818` 工具的服务端；六个命令、路径穿越防护、按**访问**时间淘汰 |
+| `trace.py` | 第 9 章 | span 树，**压缩事件也是 span** |
+| `evals/` | 第 8 章 | golden set + pass@k / pass^k + 环境状态断言 |
 
 ```bash
-pytest                    # 17 个测试，每个对应书里的一条论断
+pytest                    # 42 个测试，每个对应书里的一条论断
 python -m evals.run --k 3 # golden set
 ```
 

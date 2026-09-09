@@ -30,7 +30,7 @@ class ToolSpec:
     risk: Risk = "low"
     idempotent: bool = True              # 重试安全吗
     reversible: bool = True              # 做错了能撤销吗
-    requires_confirmation: bool = False   # 强制人工确认（第 11 章）
+    requires_confirmation: bool = False   # 强制人工确认（第 10 章）
     # 确认闸**之前**跑的廉价校验。必须无副作用。
     # 存在的理由：不要请人批准一个注定会失败的动作。
     # 让人点了「同意」再看到「无权操作」，会训练出无脑点同意的习惯，
@@ -284,7 +284,7 @@ class ToolRegistry:
     def _preview(spec: ToolSpec, args: dict) -> str:
         """给人看的确认预览。
 
-        ⚠️ 第 11 章（OWASP ASI09）：这里必须展示**原始动作**，
+        ⚠️ 第 10 章（OWASP ASI09）：这里必须展示**原始动作**，
         不能展示模型写的自然语言摘要——否则这道闸就是纸糊的。
         """
         return (

@@ -117,10 +117,10 @@ class ConfirmationRequired(HandbookError):
         # BaseException.args 是保留属性（异常参数元组），给它赋一个 dict
         # 会被静默转成 tuple(dict) —— 也就是**只剩键名**，值全丢了。
         # 这个 bug 不会报错，只会让后续的哈希/比对无声地对不上。
-        # 手册第 12 章讲「静默失败比崩溃更危险」时会用这个真实案例。
+        # 手册第 11 章讲「静默失败比崩溃更危险」时会用这个真实案例。
         self.tool_args = tool_args
         # preview 必须是原始动作的展示，不是模型写的摘要。
-        # 理由见手册第 11 章（OWASP ASI09 人机信任利用）。
+        # 理由见手册第 10 章（OWASP ASI09 人机信任利用）。
         self.preview = preview
 
 

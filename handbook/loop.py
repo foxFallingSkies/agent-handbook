@@ -1,4 +1,4 @@
-"""Agent 循环。手册第 6 章。
+"""Agent 循环。手册第 5 章。
 
 第 1 章那十行伪代码的生产版本。核心是把"自主性"和"约束"放在一起：
 
@@ -51,7 +51,7 @@ class Outcome:
     """一次运行的结果。
 
     注意 `final_text` 和 `verified` 是**分开**的两件事：
-    前者是 agent 说了什么，后者是环境状态是否真的对。第 9 章会反复用到这个区分。
+    前者是 agent 说了什么，后者是环境状态是否真的对。第 8 章会反复用到这个区分。
     """
 
     status: str                      # done / needs_confirmation / stopped
@@ -114,7 +114,7 @@ class Agent:
     def allow_only(self, names: set[str] | None) -> None:
         """遮蔽工具。工具定义仍在上下文里（保住缓存前缀），只是不让调。
 
-        第 11 章的"能力降级"会用它：读了不可信内容之后收窄可用集合。
+        第 10 章的"能力降级"会用它：读了不可信内容之后收窄可用集合。
         """
         self._allowed = names
 
@@ -260,7 +260,7 @@ class Agent:
                             f"无进展：连续 {self.budget.same_state_limit} 步之后"
                             f"环境状态没有任何变化")
 
-                # 把上下文事件也记进 trace（第 10 章会接到 OTel 上）
+                # 把上下文事件也记进 trace（第 9 章会接到 OTel 上）
                 for ev in self.ctx.events[len(
                         [s for s in tr.spans if s.kind == "context"]):]:
                     with tr.span(ev.get("type", "context"), "context",
