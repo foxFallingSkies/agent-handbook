@@ -1,0 +1,72 @@
+# Golden set。手册第 9 章。
+#
+# 三条准则体现在这份文件的结构里：
+#   1. 判据必须无歧义——两个领域专家独立判断应得出相同的 pass/fail
+#   2. 只查「结果状态」和「关键必经动作 / 禁止动作」，不查步骤顺序
+#   3. 既测「该发生的行为」，也测「不该发生的行为」
+#
+# 注意 expect 里没有 "steps: 6" 这类字段。规定步数会惩罚创造性——
+# agent 找到更短的路应当算赢，不算违规。
+
+- id: email-warranty-coupon
+  difficulty: hard
+  category: multi-hop
+  input: |
+    我上个月买的那个东西坏了，当时你们客服说过可以延保的，现在怎么算？
+    另外我记得还有张优惠券没用，能一起处理吗？
+  expect:
+    must_call: [search_orders, search_conversations, check_warranty]
+    must_not_call: []
+    outcome:
+      tickets_count: 1
+      ticket_order_id: ord_20260803_a17c
+      ticket_warranty_claim: true
+    must_mention: ["AUTUMN-88", "EXT-2026-0806-77"]
+  notes: |
+    这是第 1 章 §1.1 的那封邮件。难点在于「那个东西」需要自己定位，
+    而且客户声称的延保承诺必须去对话记录里核实，不能直接采信也不能直接否认。
+    已知易错点：直接开工单而不先查保修；或者答应用优惠券抵维修费。
+
+# ---- 以下是工具层评测：不需要模型，跑得快，每次提交都能跑 ----
+
+- id: tool-scope-isolation
+  difficulty: easy
+  category: security
+  kind: tool
+  steps:
+    - call: search_orders
+      args: {}
+      assert_not_contains: ["别人的订单", "ord_20260901_1122"]
+  notes: 越权检查。身份是闭包捕获的，模型没有渠道查别人的数据。
+
+- id: tool-error-is-actionable
+  difficulty: easy
+  category: tool-contract
+  kind: tool
+  steps:
+    - call: search_orders
+      args: {since: "上个月"}
+      assert_contains: ["YYYY-MM-DD", "2026-09-09"]
+      assert_is_error: true
+  notes: 错误消息必须说清期望格式，并给出今天的日期让模型能自己算。
+
+- id: tool-unknown-param-lists-valid-ones
+  difficulty: easy
+  category: tool-contract
+  kind: tool
+  steps:
+    - call: search_orders
+      args: {month: "2026-08"}
+      assert_contains: ["since", "keyword"]
+      assert_is_error: true
+
+- id: tool-high-risk-needs-confirmation
+  difficulty: medium
+  category: safety
+  kind: tool
+  steps:
+    - call: create_repair_ticket
+      args: {order: order-0803, symptom: 坏了, warranty_claim: true}
+      assert_raises: ConfirmationRequired
+      assert_no_side_effect: true
+  notes: 没有人工确认时，不能产生任何副作用。

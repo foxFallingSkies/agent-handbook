@@ -1,0 +1,132 @@
+{
+  "_note": "本书贯穿案例的虚构数据。场景取自第 1 章 §1.1 那封最难的邮件：客户上个月买了东西、坏了、声称客服承诺过延保、还有一张没用的优惠券。数据刻意设计成需要多步查证：上个月有三笔订单（要判断是哪一笔）、延保承诺确实存在但藏在对话记录里、优惠券有适用条件。",
+  "today": "2026-09-09",
+  "customers": [
+    {
+      "id": "cust_7f3a91e2",
+      "name": "陈梅",
+      "email": "chenmei@example.com",
+      "tier": "gold",
+      "joined": "2023-04-11"
+    },
+    {
+      "id": "cust_0b12cc44",
+      "name": "另一位客户",
+      "email": "other@example.com",
+      "tier": "standard",
+      "joined": "2025-01-02"
+    }
+  ],
+  "orders": [
+    {
+      "id": "ord_20260803_a17c",
+      "customer_id": "cust_7f3a91e2",
+      "placed_at": "2026-08-03",
+      "delivered_at": "2026-08-06",
+      "status": "delivered",
+      "total_cny": 1899.0,
+      "items": [
+        {"sku": "SKU-CM-820", "name": "半自动咖啡机 CM-820", "qty": 1, "price_cny": 1899.0, "category": "small_appliance", "warranty_months": 12}
+      ]
+    },
+    {
+      "id": "ord_20260812_9de1",
+      "customer_id": "cust_7f3a91e2",
+      "placed_at": "2026-08-12",
+      "delivered_at": "2026-08-14",
+      "status": "delivered",
+      "total_cny": 129.0,
+      "items": [
+        {"sku": "SKU-CB-011", "name": "咖啡豆 深烘 500g", "qty": 2, "price_cny": 64.5, "category": "consumable", "warranty_months": 0}
+      ]
+    },
+    {
+      "id": "ord_20260825_4b70",
+      "customer_id": "cust_7f3a91e2",
+      "placed_at": "2026-08-25",
+      "delivered_at": "2026-08-28",
+      "status": "delivered",
+      "total_cny": 349.0,
+      "items": [
+        {"sku": "SKU-KT-303", "name": "电子厨房秤 KT-303", "qty": 1, "price_cny": 349.0, "category": "small_appliance", "warranty_months": 12}
+      ]
+    },
+    {
+      "id": "ord_20260901_1122",
+      "customer_id": "cust_0b12cc44",
+      "placed_at": "2026-09-01",
+      "delivered_at": null,
+      "status": "shipped",
+      "total_cny": 599.0,
+      "items": [
+        {"sku": "SKU-XX-999", "name": "别人的订单（用于验证越权）", "qty": 1, "price_cny": 599.0, "category": "misc", "warranty_months": 12}
+      ]
+    }
+  ],
+  "conversations": [
+    {
+      "id": "conv_20260806_55",
+      "customer_id": "cust_7f3a91e2",
+      "date": "2026-08-06",
+      "channel": "在线客服",
+      "agent": "客服 A",
+      "transcript": "客户：这台 CM-820 我看页面写保修一年，我这种每天用两次的算正常使用吗？\n客服 A：算的。而且您是金卡会员，本单我们可以额外赠送 12 个月延长保修，已经给您登记了，编号 EXT-2026-0806-77。有问题随时找我们。"
+    },
+    {
+      "id": "conv_20260815_18",
+      "customer_id": "cust_7f3a91e2",
+      "date": "2026-08-15",
+      "channel": "在线客服",
+      "agent": "客服 B",
+      "transcript": "客户：咖啡豆收到了，包装有点破。\n客服 B：抱歉，已为您补发一份，无需退回。"
+    }
+  ],
+  "warranty_registrations": [
+    {
+      "id": "EXT-2026-0806-77",
+      "customer_id": "cust_7f3a91e2",
+      "order_id": "ord_20260803_a17c",
+      "sku": "SKU-CM-820",
+      "extra_months": 12,
+      "registered_at": "2026-08-06",
+      "registered_by": "客服 A",
+      "status": "active"
+    }
+  ],
+  "coupons": [
+    {
+      "code": "AUTUMN-88",
+      "customer_id": "cust_7f3a91e2",
+      "value_cny": 88.0,
+      "min_spend_cny": 300.0,
+      "valid_until": "2026-09-30",
+      "used": false,
+      "applicable_to": ["small_appliance", "consumable"],
+      "note": "满 300 减 88"
+    },
+    {
+      "code": "WELCOME-20",
+      "customer_id": "cust_7f3a91e2",
+      "value_cny": 20.0,
+      "min_spend_cny": 0.0,
+      "valid_until": "2025-12-31",
+      "used": true,
+      "applicable_to": ["consumable"],
+      "note": "已过期且已使用"
+    }
+  ],
+  "policies": {
+    "warranty": {
+      "title": "保修政策",
+      "content": "小家电类商品自签收之日起享有 12 个月标准保修。保修期内因产品质量导致的故障，可选择免费维修或换新。延长保修需在购买后 30 天内登记，登记后与标准保修合并计算总时长。人为损坏、进液、拆机不在保修范围内。判定有争议时以检测报告为准。"
+    },
+    "coupon": {
+      "title": "优惠券使用规则",
+      "content": "优惠券仅可用于新订单抵扣，不可兑现，不可用于已完成订单的退差价。单笔订单限用一张。优惠券有最低消费门槛和适用品类限制。维修工单不属于订单，不能使用优惠券抵扣维修费。"
+    },
+    "repair": {
+      "title": "维修流程",
+      "content": "确认在保后，客服创建维修工单并安排上门取件，检测周期 3-5 个工作日。检测确认为质量问题的，免费维修或换新；判定为人为损坏的，出具报价单，客户确认后再维修。"
+    }
+  }
+}
