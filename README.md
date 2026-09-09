@@ -146,17 +146,6 @@ python -m evals.run --live --k 5      # 真实的 pass^k
 
 ---
 
-## 与其它资料的关系
-
-如果你要系统学 agent 的设计模式，Antonio Gulli 的
-[Agentic Design Patterns](https://github.com/evoiz/Agentic-Design-Patterns)（21 章 + 7 附录，
-每章配 notebook，英文）是一份很好的模式目录。
-
-这个项目不是模式目录，路子不同：它只讲一个逐步长大的系统，
-每一层都从「不做会怎么死」出发推导出来，并且**大量引用前沿团队自己公开的工程文档与它们之间的分歧**
-（Anthropic / OpenAI / Manus / Cognition 在多 agent、few-shot、工具集动态加载上都有公开冲突）。
-两者可以对着看。
-
 ## License
 
 MIT

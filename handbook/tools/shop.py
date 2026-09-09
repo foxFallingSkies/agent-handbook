@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+from calendar import monthrange
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,41 @@ DESC_CREATE_TICKET = (
     "只在确认了保修状态、且客户明确希望维修时才调用。\n"
     "warranty_claim 表示是否按保修处理（免费）；若为 false 则走付费维修报价流程。"
 )
+
+
+
+def _find_order(shop, order_id: str, customer_id: str, verb: str = "访问该订单") -> dict:
+    """按 id 找订单，找不到就给一条**能照着改**的错误。
+
+    ⚠️ 原来这里是 `next(x for x in ... )`。订单号写错时它抛 StopIteration——
+    一个既不会被 ToolResult 捕获、也不告诉模型任何信息的异常。
+    工具层的每一条失败路径都要落在 ToolError 上，否则第 4 章那句
+    「错误消息是 prompt」就只对成功路径成立。
+    """
+    o = next((x for x in shop.data["orders"] if x["id"] == order_id), None)
+    if o is None:
+        mine = [x["id"] for x in shop.data["orders"]
+                if x["customer_id"] == customer_id]
+        raise ToolError(
+            f"没有编号为 {order_id!r} 的订单。",
+            hint=f"该客户名下的订单：{', '.join(mine) or '无'}。"
+                 f"可以先用 search_orders 确认订单号。",
+        )
+    if o["customer_id"] != customer_id:              # 纵深防御
+        raise ToolError(f"无权{verb}。", hint="只能操作当前客户名下的订单。")
+    return o
+
+
+def _add_months(start: date, months: int) -> date:
+    """从 start 往后推 months 个月，落在月末时向下取该月最后一天。
+
+    ⚠️ 原来是 `min(delivered.day, 28)`。那会把 8 月 31 日签收的订单
+    算成次年 8 月 28 日到期——**悄悄少赔三天保修**。
+    没人会发现，直到有个客户在第 29 天来报修。
+    """
+    y = start.year + (start.month - 1 + months) // 12
+    m = (start.month - 1 + months) % 12 + 1
+    return date(y, m, min(start.day, monthrange(y, m)[1]))
 
 
 def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, SemanticIdMap]:
@@ -170,41 +206,51 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
 
     def check_warranty(order: str) -> str:
         real = ids.resolve(order)
-        o = next(x for x in shop.data["orders"] if x["id"] == real)
-        if o["customer_id"] != customer_id:              # 纵深防御
-            raise ToolError("无权访问该订单。", hint="只能查询当前客户名下的订单。")
+        o = _find_order(shop, real, customer_id)
 
-        item = o["items"][0]
-        base = item["warranty_months"]
-        if base == 0:
-            return json.dumps(
-                {"order": order, "item": item["name"], "covered": False,
-                 "reason": "该品类不提供保修"},
-                ensure_ascii=False, sort_keys=True,
+        # 没签收就没有保修起算点。这不是"没保修"，是"还没开始"——
+        # 两者对客户的答复完全不同，所以不能糊成一个 False。
+        if not o.get("delivered_at"):
+            raise ToolError(
+                f"订单 {order} 尚未签收（当前状态：{o['status']}），保修期还没有起算。",
+                hint="保修从签收日算起。请先确认订单是否已送达，"
+                     "或者告知客户保修将在签收后开始。",
             )
 
         exts = [w for w in shop.warranty_of(customer_id)
                 if w["order_id"] == real and w["status"] == "active"]
         extra = sum(w["extra_months"] for w in exts)
         delivered = date.fromisoformat(o["delivered_at"])
-        months = base + extra
-        end_year = delivered.year + (delivered.month - 1 + months) // 12
-        end_month = (delivered.month - 1 + months) % 12 + 1
-        end = date(end_year, end_month, min(delivered.day, 28))
+
+        # ⚠️ 逐件算，不是只算 items[0]。
+        # 一张订单里既可能有 12 个月保修的机器，也可能有 0 个月的耗材；
+        # 只看第一件会把整单的保修判定押在数组顺序上——
+        # 而数组顺序不是业务事实。
+        lines = []
+        for item in o["items"]:
+            base = item["warranty_months"]
+            if base == 0:
+                lines.append({"sku": item["sku"], "item": item["name"],
+                              "covered": False, "reason": "该品类不提供保修"})
+                continue
+            end = _add_months(delivered, base + extra)
+            lines.append({
+                "sku": item["sku"], "item": item["name"],
+                "covered": shop.today <= end,
+                "base_months": base, "extra_months": extra,
+                "covered_until": end.isoformat(),
+            })
 
         return json.dumps(
             {
                 "order": order,
-                "item": item["name"],
-                "covered": shop.today <= end,
                 "delivered_at": o["delivered_at"],
-                "base_months": base,
-                "extra_months": extra,
+                "items": lines,
+                "any_covered": any(x["covered"] for x in lines),
                 "extension_records": [
                     {"id": w["id"], "registered_at": w["registered_at"],
                      "registered_by": w["registered_by"]} for w in exts
                 ],
-                "covered_until": end.isoformat(),
             },
             ensure_ascii=False, sort_keys=True,
         )
@@ -227,6 +273,32 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
             return "该客户名下没有优惠券。"
         return json.dumps(rows, ensure_ascii=False, sort_keys=True)
 
+    def read_stashed(path: str) -> str:
+        """把折叠到磁盘上的原文读回来。
+
+        ⚠️ 这个工具是「压缩要留钥匙」这条原则的**另一半**。
+        只写钥匙不给取回工具，那把钥匙就配不上任何一把锁——
+        折叠仍然是有损的，只是损得比较体面。
+        """
+        from pathlib import Path as _P
+        f = _P(path)
+        # 路径必须落在 workspace 内：path 来自模型，是可控输入
+        root = _P("workspace").resolve()
+        try:
+            resolved = f.resolve()
+            resolved.relative_to(root)
+        except (ValueError, OSError):
+            raise ToolError(
+                f"路径 {path!r} 不在允许的工作目录内。",
+                hint="只能读取折叠记录里给出的、位于 workspace/ 下的路径。",
+            )
+        if not resolved.exists():
+            raise ToolError(
+                f"文件 {path!r} 不存在。",
+                hint="请核对折叠记录里给出的路径；如果它已被清理，就重新调用原来那个工具。",
+            )
+        return resolved.read_text(encoding="utf-8")
+
     def get_policy(topic: str) -> str:
         p = shop.data["policies"].get(topic)
         if p is None:
@@ -238,10 +310,8 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
 
     def create_repair_ticket(order: str, symptom: str, warranty_claim: bool) -> str:
         real = ids.resolve(order)
-        o = next(x for x in shop.data["orders"] if x["id"] == real)
-        if o["customer_id"] != customer_id:
-            raise ToolError("无权对该订单创建工单。",
-                            hint="只能操作当前客户名下的订单。")
+        o = _find_order(shop, real, customer_id,
+                        verb="对该订单创建工单")
         ticket = {
             "id": f"TCK-{len(shop.tickets) + 1:04d}",
             "order_id": real,
@@ -311,6 +381,25 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
         description=DESC_LIST_COUPONS,
         parameters={"type": "object", "properties": {}, "required": []},
         fn=list_coupons, risk="low", scope="customer",
+    ))
+
+    reg.register(ToolSpec(
+        name="read_stashed",
+        description=(
+            "读回一段被折叠到磁盘上的工具结果。当你在历史里看到"
+            "「第 N 步的工具结果已折叠。原文在 <路径>」这样的记录，"
+            "而你现在又需要那份原文时，用这个工具把它取回来。\n"
+            "path 参数就填那条记录里给出的路径。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string",
+                         "description": "折叠记录里给出的文件路径"},
+            },
+            "required": ["path"],
+        },
+        fn=read_stashed, risk="low", scope="public",
     ))
 
     reg.register(ToolSpec(

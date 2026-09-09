@@ -36,7 +36,6 @@ class Entry:
     kind: Kind
     step: int
     tool_use_id: str | None = None
-    consumed: bool = False         # 是否已被后续步骤消费
     retrieval_key: str | None = None   # 取回的钥匙：URL / 文件路径 / 查询语句
     folded: bool = False
     # 结构化内容块。assistant 轮里的 tool_use 必须原样回传给 API，
@@ -55,6 +54,54 @@ class Entry:
         self.content = note
         self.folded = True
         self._tokens = None
+
+
+class MessageInvariantError(Exception):
+    """构造出的 messages 违反了 API 的硬约束。
+
+    这个异常存在的意义是**在本地失败，而不是让 API 去发现**。
+    真实 API 对这两条会直接返回 400，而离线的脚本化响应不会校验——
+    也就是说，不主动检查的话，这类 bug 只在第一次真实调用时才炸。
+    """
+
+
+def _enforce_invariants(msgs: list[dict]) -> list[dict]:
+    """把 API 的两条硬约束变成本地的断言。
+
+    ① 每个 tool_result 必须能对应到前面某个 tool_use。
+    ② 角色必须交替（连续同角色要合并）。
+    """
+    # ② 合并连续同角色
+    merged: list[dict] = []
+    for m in msgs:
+        if merged and merged[-1]["role"] == m["role"]:
+            prev, cur = merged[-1]["content"], m["content"]
+            prev = prev if isinstance(prev, list) else [{"type": "text", "text": prev}]
+            cur = cur if isinstance(cur, list) else [{"type": "text", "text": cur}]
+            merged[-1] = {"role": m["role"], "content": prev + cur}
+        else:
+            merged.append(dict(m))
+
+    # ① 配对检查
+    seen_use: set[str] = set()
+    for m in merged:
+        content = m["content"]
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use":
+                seen_use.add(b["id"])
+            elif b.get("type") == "tool_result":
+                tid = b.get("tool_use_id")
+                if tid not in seen_use:
+                    raise MessageInvariantError(
+                        f"孤儿 tool_result：{tid} 没有对应的 tool_use。\n"
+                        f"最常见的成因是压缩把承载 tool_use 的 assistant 轮丢掉了，"
+                        f"却留下了它的结果——压缩的单位必须是「整轮」而不是单条记录。"
+                    )
+    return merged
 
 
 def default_summarizer(entries: list[Entry]) -> str:
@@ -126,13 +173,22 @@ class ContextManager:
     # ------------------------------------------------------------------
 
     def _rolling_fold(self) -> None:
-        """把够老、且能安全折叠的观察结果折成一行。
+        """把够老、且能**无损**折叠的观察结果折成一行。
 
         判据（第 3 章）：**这段内容还会不会影响后续决策？**
-        - 失败记录  → 永远保留。它把一片动作空间标成了"此路不通"。
-        - 带钥匙的  → 可折叠，因为随时能取回，折叠是无损的。
-        - 已消费的  → 可折叠，它的结论已经体现在后续动作里。
-        - 其余      → 保留。
+
+        ⚠️ 这一版比初版严格得多，原因是一次真实的审查：
+        初版有两条折叠分支——「有钥匙」和「已消费」。而 loop 从不写 retrieval_key，
+        却无条件把上一步的 observation 标成 consumed，于是**永远走第二条分支**，
+        把原文替换成一行摘要且无处可取回。书里写着「因为有钥匙，所以无损」，
+        而在唯一真正运行的路径上，那句话是假的。
+
+        现在只剩一条分支：**没有钥匙就不折叠**。
+        「无损」不再是一个承诺，而是一个由数据结构保证的事实。
+
+        顺带删掉了 `consumed` 字段。既然折叠必须有钥匙，「后续步骤读过了没有」
+        就不再影响任何判断——而它恰恰是那个只有 loop 会写、ContextManager
+        却拿它做决策的字段。这类跨层的隐式约定正是上面那个 bug 的成因。
         """
         folded_tokens = 0
         for e in self.entries:
@@ -140,15 +196,14 @@ class ContextManager:
                 continue
             if self.step - e.step < self.fold_after_steps:
                 continue
-            if e.kind == "error":
+            # 唯一的折叠条件：有取回的钥匙
+            if not e.retrieval_key:
                 continue
             before = e.tokens
-            if e.retrieval_key:
-                e.fold(f"[已折叠，可用 {e.retrieval_key} 取回原文]")
-            elif e.consumed:
-                e.fold(f"[已折叠：第 {e.step} 步的工具结果，已被后续步骤使用]")
-            else:
-                continue
+            e.fold(
+                f"[第 {e.step} 步的工具结果已折叠。"
+                f"原文在 {e.retrieval_key}，需要时用 read_stashed 取回]"
+            )
             folded_tokens += before - e.tokens
 
         if folded_tokens:
@@ -160,26 +215,63 @@ class ContextManager:
     # 兜底机制：阈值压缩
     # ------------------------------------------------------------------
 
+    def _turns(self) -> list[list[Entry]]:
+        """把 entries 切成**原子轮次**：一条 assistant 动作 + 它全部的 tool_result。
+
+        ⚠️ 压缩的单位必须是轮次，不能是单条 Entry。
+        初版按 Entry 压，而 `_must_keep` 让 error 永远保留、action 可以被丢——
+        两者不同步，于是产生了**没有对应 tool_use 的孤儿 tool_result**，
+        真实 API 会直接以 400 拒绝。这个 bug 在离线脚本下测不出来。
+        """
+        turns: list[list[Entry]] = []
+        cur: list[Entry] = []
+        for e in self.entries:
+            if e.kind in ("action", "task", "summary", "note"):
+                if cur:
+                    turns.append(cur)
+                cur = [e]
+            else:                       # observation / error 附着在上一条 action 上
+                if not cur:
+                    cur = []
+                cur.append(e)
+        if cur:
+            turns.append(cur)
+        return turns
+
     def _emergency_compact(self) -> None:
         before = self.used_tokens()
+        turns = self._turns()
 
-        keep: list[Entry] = []
+        keep: list[list[Entry]] = []
         fold: list[Entry] = []
-        for e in self.entries:
-            (keep if self._must_keep(e) else fold).append(e)
+        for turn in turns:
+            # 整轮一起判：只要这一轮里有任何一条必须保留，整轮都留下
+            if any(self._must_keep(e) for e in turn):
+                keep.append(turn)
+            else:
+                fold.extend(turn)
 
         if not fold:
-            # 压不动了：全部都是必须保留的。这是一个需要被看见的信号，
-            # 而不是静默地继续跑到溢出。
             self.events.append(
                 {"type": "compaction_stalled", "step": self.step, "tokens": before}
             )
             return
 
-        summary = Entry(
-            role="user", content=self.summarize(fold), kind="summary", step=self.step
-        )
-        self.entries = [summary] + keep
+        new_summary = self.summarize(fold)
+        flat = [e for turn in keep for e in turn]
+
+        # 摘要要**合并**进已有的那条，不能每次 prepend 一条新的——
+        # summary 是 must_keep，堆叠几轮之后会导致所有条目都不可折叠（compaction_stalled）
+        existing = next((e for e in flat if e.kind == "summary"), None)
+        if existing is not None:
+            existing.content = existing.content + "\n" + new_summary
+            existing._tokens = None
+            self.entries = flat
+        else:
+            self.entries = [
+                Entry(role="user", content=new_summary, kind="summary", step=self.step)
+            ] + flat
+
         after = self.used_tokens()
         self.events.append(
             {
@@ -188,6 +280,7 @@ class ContextManager:
                 "before": before,
                 "after": after,
                 "folded_entries": len(fold),
+                "folded_turns": len(turns) - len(keep),
                 "ratio": round(after / max(before, 1), 3),
             }
         )
@@ -290,7 +383,8 @@ class ContextManager:
         # API 要求首条消息是 user
         while out and out[0]["role"] != "user":
             out.pop(0)
-        return out
+
+        return _enforce_invariants(out)
 
     def stats(self) -> dict:
         return {

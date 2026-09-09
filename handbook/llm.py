@@ -32,6 +32,9 @@ from .transport import Request, Response, Transport, Usage, default_pricing
 
 T = TypeVar("T", bound=BaseModel)
 
+# 退避的硬上限。没有它，服务端的 retry_after 就是一个可以让你睡到天亮的开关。
+MAX_BACKOFF_SECONDS = 30.0
+
 
 # ---------------------------------------------------------------------------
 
@@ -113,8 +116,11 @@ class LLM:
             max_tokens=tier.max_tokens,
             temperature=temperature,
         )
-        resp, retries = await self._send_with_retry(req, tier)
-        self.records.append(CallRecord(tier=tier.name, usage=resp.usage, retries=retries))
+        resp, retries, used = await self._send_with_retry(req, tier)
+        # 记 used 而不是 tier：降级之后这笔钱是花在便宜档上的，
+        # 记成原档会让 cost_report 的 by_tier 与账单对不上——
+        # 而 by_tier 存在的唯一理由就是和账单对得上。
+        self.records.append(CallRecord(tier=used.name, usage=resp.usage, retries=retries))
         return resp
 
     # ------------------------------------------------------------------
@@ -158,10 +164,10 @@ class LLM:
                 max_tokens=tier.max_tokens,
                 temperature=0.0,
             )
-            resp, retries = await self._send_with_retry(req, tier)
+            resp, retries, used = await self._send_with_retry(req, tier)
             total_retries += retries
             self.records.append(
-                CallRecord(tier=tier.name, usage=resp.usage, repairs=repair,
+                CallRecord(tier=used.name, usage=resp.usage, repairs=repair,
                            retries=retries)
             )
 
@@ -194,24 +200,34 @@ class LLM:
     # 重试
     # ------------------------------------------------------------------
 
-    async def _send_with_retry(self, req: Request, tier: Tier) -> tuple[Response, int]:
-        """按异常类型分流的重试。第 2 章 §2.6。"""
+    async def _send_with_retry(
+        self, req: Request, tier: Tier
+    ) -> tuple[Response, int, Tier]:
+        """按异常类型分流的重试。第 2 章 §2.6。
+
+        返回值里带上**实际用了哪一档**——因为可能降级过。
+        """
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries):
             try:
-                return await self.transport.send(req), attempt
+                return await self.transport.send(req), attempt, tier
             except RateLimitError as e:
                 last_error = e
                 # 服务端给了建议就听它的；否则指数退避 + 抖动。
                 # 抖动不是可选项：没有它，并发请求会同步重试形成脉冲。
-                delay = e.retry_after if e.retry_after else (2**attempt)
+                if attempt == self.max_retries - 1:
+                    break                       # 最后一次不必再睡
+                # ⚠️ 服务端给的 retry_after 必须封顶：见过返回 3600 的，
+                # 不封顶就是让 agent 睡一小时，而 Budget.max_seconds 管不到步内。
+                delay = min(e.retry_after or (2**attempt), MAX_BACKOFF_SECONDS)
                 await asyncio.sleep(delay + random.random())
             except ServerError as e:
                 last_error = e
                 if attempt == self.max_retries - 1:
                     break
-                await asyncio.sleep((2**attempt) + random.random() * 0.5)
+                await asyncio.sleep(
+                    min(2**attempt, MAX_BACKOFF_SECONDS) + random.random() * 0.5)
             except BadRequestError:
                 # 4xx 不重试——重试只会重复失败
                 raise
@@ -227,12 +243,17 @@ class LLM:
                 temperature=req.temperature,
             )
             try:
-                return await self.transport.send(fb), self.max_retries
-            except Exception:
-                pass
+                return (await self.transport.send(fb), self.max_retries,
+                        self.fallback_tier)
+            except Exception as fb_err:
+                # 不吞掉它。降级失败的原因往往和主路径不同
+                # （比如 fallback 模型不支持某个 tool schema），
+                # 吞掉它就等于把一条最有诊断价值的信息丢进黑洞。
+                last_error = fb_err
 
         raise RetryExhausted(
-            f"{self.max_retries} 次重试后仍失败，且降级路径不可用"
+            f"{self.max_retries} 次重试后仍失败，降级路径也未能返回："
+            f"{type(last_error).__name__}: {last_error}"
         ) from last_error
 
     # ------------------------------------------------------------------

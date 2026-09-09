@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from math import comb
 from pathlib import Path
 
 import yaml
@@ -91,7 +92,12 @@ async def run_agent_case(case: dict, live: bool) -> tuple[bool, str]:
         agent.confirm(digest_of(out.pending.tool_name, out.pending.tool_args))
         out = await agent.run(trace=tr)
 
-    called = [s.name for s in tr.spans if s.kind == "tool_call"]
+    # ⚠️ 只统计**真的执行了**的工具调用。
+    # 被人工确认闸拦下的调用也会开 span，如果一并算进来，
+    # must_not_call 这条专门用来测安全的断言就永远分不清
+    # 「闸门守住了」和「闸门破了」——那等于这个维度失效。
+    called = [s.name for s in tr.spans
+              if s.kind == "tool_call" and s.attrs.get("executed")]
     exp = case["expect"]
 
     # ---- 关键必经动作（不查顺序，也不查次数） ----
@@ -123,6 +129,34 @@ async def run_agent_case(case: dict, live: bool) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+def pass_at_k(n: int, c: int, k: int) -> float:
+    """k 次里**至少一次**成功的概率（无偏估计）。
+
+    = 1 - C(n-c, k) / C(n, k)   —— 即「k 次全部抽到失败」的补集
+    """
+    if n < k or k <= 0:
+        return float("nan")
+    if n - c < k:
+        return 1.0
+    return 1.0 - comb(n - c, k) / comb(n, k)
+
+
+def pass_pow_k(n: int, c: int, k: int) -> float:
+    """k 次**全部**成功的概率（无偏估计）。
+
+    = C(c, k) / C(n, k)
+
+    ⚠️ 不是 c / n。c/n 是**平均成功率**，也就是插章 A 明令不要用的那个数。
+    两者只在 k = 1 时相等——而初版恰好只跑过 k=1，所以这个错误被掩盖了。
+    直观差别：c/n = 1/2 时，平均成功率是 0.50，而 pass^2 是 0.00。
+    """
+    if n < k or k <= 0:
+        return float("nan")
+    if c < k:
+        return 0.0
+    return comb(c, k) / comb(n, k)
+
+
 async def main(k: int, live: bool) -> int:
     cases = yaml.safe_load(CASES.read_text(encoding="utf-8"))
     print(f"golden set: {len(cases)} 条   trials per case: k={k}   "
@@ -148,6 +182,9 @@ async def main(k: int, live: bool) -> int:
         pass_pow_k = passed / n if n else 0.0     # 这里等于全过的比例
         rows.append((case["id"], passed, n, pass_at_k, pass_pow_k, notes[:1]))
 
+    if not rows:
+        print("golden set 为空")
+        return 1
     width = max(len(r[0]) for r in rows)
     print(f"{'case'.ljust(width)}  通过/试次  pass@k  pass^k  备注")
     print("-" * (width + 40))
@@ -169,4 +206,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=1, help="每条 agent 用例跑几次")
     ap.add_argument("--live", action="store_true")
-    raise SystemExit(asyncio.run(main(ap.parse_args().k, ap.parse_args().live)))
+    args = ap.parse_args()
+    raise SystemExit(asyncio.run(main(args.k, args.live)))
