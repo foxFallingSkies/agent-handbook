@@ -308,6 +308,16 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
             )
         return json.dumps(p, ensure_ascii=False, sort_keys=True)
 
+    def precheck_ticket(args: dict) -> None:
+        """开工单前的廉价校验，跑在人工确认**之前**。
+
+        订单号解析不出来、或者不是这位客户的——这两件事不需要人来判断，
+        也不该占用人的注意力。确认闸要留给真正需要判断的那一类：
+        「这个动作本身该不该做」。
+        """
+        _find_order(shop, ids.resolve(args["order"]), customer_id,
+                    verb="对该订单创建工单")
+
     def create_repair_ticket(order: str, symptom: str, warranty_claim: bool) -> str:
         real = ids.resolve(order)
         o = _find_order(shop, real, customer_id,
@@ -438,6 +448,7 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
         idempotent=False,          # 调两次会开两张工单
         reversible=False,
         requires_confirmation=True,
+        precheck=precheck_ticket,
         scope="customer",
     ))
 

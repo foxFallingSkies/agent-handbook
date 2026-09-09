@@ -30,7 +30,12 @@ class ToolSpec:
     risk: Risk = "low"
     idempotent: bool = True              # 重试安全吗
     reversible: bool = True              # 做错了能撤销吗
-    requires_confirmation: bool = False  # 强制人工确认（第 11 章）
+    requires_confirmation: bool = False   # 强制人工确认（第 11 章）
+    # 确认闸**之前**跑的廉价校验。必须无副作用。
+    # 存在的理由：不要请人批准一个注定会失败的动作。
+    # 让人点了「同意」再看到「无权操作」，会训练出无脑点同意的习惯，
+    # 而那正是确认闸唯一想防的东西。
+    precheck: Callable[[dict], None] | None = None
     scope: str = "customer"              # 数据可见范围，见 §"鉴权"一节
 
     def to_api(self) -> dict:
@@ -174,6 +179,10 @@ class ToolRegistry:
                 )
 
             self._validate(spec, args)
+
+            # 语义校验先于确认闸：schema 对不代表这个动作做得成。
+            if spec.precheck is not None:
+                spec.precheck(args)
 
             if spec.requires_confirmation and not confirmed:
                 raise ConfirmationRequired(

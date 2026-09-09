@@ -26,7 +26,14 @@
       "status": "delivered",
       "total_cny": 1899.0,
       "items": [
-        {"sku": "SKU-CM-820", "name": "半自动咖啡机 CM-820", "qty": 1, "price_cny": 1899.0, "category": "small_appliance", "warranty_months": 12}
+        {
+          "sku": "SKU-CM-820",
+          "name": "半自动咖啡机 CM-820",
+          "qty": 1,
+          "price_cny": 1899.0,
+          "category": "small_appliance",
+          "warranty_months": 12
+        }
       ]
     },
     {
@@ -37,7 +44,14 @@
       "status": "delivered",
       "total_cny": 129.0,
       "items": [
-        {"sku": "SKU-CB-011", "name": "咖啡豆 深烘 500g", "qty": 2, "price_cny": 64.5, "category": "consumable", "warranty_months": 0}
+        {
+          "sku": "SKU-CB-011",
+          "name": "咖啡豆 深烘 500g",
+          "qty": 2,
+          "price_cny": 64.5,
+          "category": "consumable",
+          "warranty_months": 0
+        }
       ]
     },
     {
@@ -48,8 +62,34 @@
       "status": "delivered",
       "total_cny": 349.0,
       "items": [
-        {"sku": "SKU-KT-303", "name": "电子厨房秤 KT-303", "qty": 1, "price_cny": 349.0, "category": "small_appliance", "warranty_months": 12}
+        {
+          "sku": "SKU-KT-303",
+          "name": "电子厨房秤 KT-303",
+          "qty": 1,
+          "price_cny": 349.0,
+          "category": "small_appliance",
+          "warranty_months": 12
+        }
       ]
+    },
+    {
+      "id": "ord_20260907_c3f9",
+      "customer_id": "cust_7f3a91e2",
+      "placed_at": "2026-09-07",
+      "delivered_at": null,
+      "status": "shipped",
+      "total_cny": 259.0,
+      "items": [
+        {
+          "sku": "SKU-GR-120",
+          "name": "手摇磨豆机 GR-120",
+          "qty": 1,
+          "price_cny": 259.0,
+          "category": "small_appliance",
+          "warranty_months": 12
+        }
+      ],
+      "_why": "在途订单。用来测「保修期还没起算」——它和「不保修」是两回事，而原实现会在这里 date.fromisoformat(None) 抛 TypeError。必须挂在**当前客户**名下，否则会先被语义 ID 映射挡掉，那条用例就只是在重复测越权。"
     },
     {
       "id": "ord_20260901_1122",
@@ -59,7 +99,14 @@
       "status": "shipped",
       "total_cny": 599.0,
       "items": [
-        {"sku": "SKU-XX-999", "name": "别人的订单（用于验证越权）", "qty": 1, "price_cny": 599.0, "category": "misc", "warranty_months": 12}
+        {
+          "sku": "SKU-XX-999",
+          "name": "别人的订单（用于验证越权）",
+          "qty": 1,
+          "price_cny": 599.0,
+          "category": "misc",
+          "warranty_months": 12
+        }
       ]
     }
   ],
@@ -101,7 +148,10 @@
       "min_spend_cny": 300.0,
       "valid_until": "2026-09-30",
       "used": false,
-      "applicable_to": ["small_appliance", "consumable"],
+      "applicable_to": [
+        "small_appliance",
+        "consumable"
+      ],
       "note": "满 300 减 88"
     },
     {
@@ -111,7 +161,9 @@
       "min_spend_cny": 0.0,
       "valid_until": "2025-12-31",
       "used": true,
-      "applicable_to": ["consumable"],
+      "applicable_to": [
+        "consumable"
+      ],
       "note": "已过期且已使用"
     }
   ],
