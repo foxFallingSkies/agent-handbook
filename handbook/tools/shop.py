@@ -344,6 +344,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="search_orders",
+        read_only=True,
         description=DESC_SEARCH_ORDERS,
         parameters={
             "type": "object",
@@ -364,6 +365,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="search_conversations",
+        read_only=True,
         description=DESC_SEARCH_CONV,
         parameters={
             "type": "object",
@@ -377,6 +379,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="check_warranty",
+        read_only=True,
         description=DESC_CHECK_WARRANTY,
         parameters={
             "type": "object",
@@ -391,6 +394,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="list_coupons",
+        read_only=True,
         description=DESC_LIST_COUPONS,
         parameters={"type": "object", "properties": {}, "required": []},
         fn=list_coupons, risk="low", scope="customer",
@@ -398,6 +402,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="read_stashed",
+        read_only=True,
         description=(
             "读回一段被折叠到磁盘上的工具结果。当你在历史里看到"
             "「第 N 步的工具结果已折叠。原文在 <路径>」这样的记录，"
@@ -417,6 +422,7 @@ def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspac
 
     reg.register(ToolSpec(
         name="get_policy",
+        read_only=True,
         description=DESC_GET_POLICY,
         parameters={
             "type": "object",

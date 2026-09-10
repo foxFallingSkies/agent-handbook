@@ -93,6 +93,7 @@ python -m examples.ch01_email          # 不需要 API key
 | `reliability.py` | 第 11 章 | 单例 flock · 租约 · append-once 去重台账 · 死信 · **带进度的心跳**（只报时间的心跳在卡死时照样跳） |
 | `trace.py` | 第 9 章 | span 树，**压缩事件也是 span** |
 | `evals/` | 第 8 章 | golden set（23 条 · 13 条负例）+ pass@k / pass^k 的组合估计量 + 环境状态断言 |
+| `evals/stats.py` | 第 8 章 §8.9 | Wilson 区间（Wald 在高 pass 率下会越界）· 配对的 McNemar（golden set 不是两组独立样本）· **只有结果变了的用例携带信息** |
 
 ```bash
 pytest                    # 64 个测试，每个对应书里的一条论断

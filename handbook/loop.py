@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import json
 import time
@@ -79,6 +81,7 @@ class Agent:
         state_probe: Callable[[], Any] | None = None,
         drift_check: Callable[[str, list[str]], bool] | None = None,
         stash_threshold_chars: int = 400,
+        parallel_tools: bool = True,
     ):
         self.llm = llm
         self.registry = registry
@@ -88,6 +91,7 @@ class Agent:
         self.verify = verify
         self.ctx = ContextManager(workspace=workspace, fold=fold)
         self.stash_threshold_chars = stash_threshold_chars
+        self.parallel_tools = parallel_tools
 
         # 闸 5 用：把「环境现在什么样」映射成一个可比较的值。
         # 没有它就没法判断「这一步之后世界有没有变化」，闸 5 只能是摆设。
@@ -145,7 +149,7 @@ class Agent:
         if self._pending_calls:
             pending, self._pending_calls = self._pending_calls, []
             with tr.span(f"step {self._pending_step} (resumed)", "step") as sp:
-                interrupted = self._execute_tools(
+                interrupted = await self._execute_tools(
                     pending, self._pending_step, tr, sp
                 )
                 if interrupted is not None:
@@ -243,7 +247,8 @@ class Agent:
                             "目标漂移：最近几步的动作已经偏离原始任务")
 
                 # ---- 执行工具 ----
-                interrupted = self._execute_tools(resp.tool_uses, step, tr, step_span)
+                interrupted = await self._execute_tools(
+                    resp.tool_uses, step, tr, step_span)
                 if interrupted is not None:
                     return interrupted
 
@@ -273,14 +278,81 @@ class Agent:
 
     # ------------------------------------------------------------------
 
-    def _execute_tools(
+    def _leading_read_only(self, tool_uses: list) -> list:
+        """取开头**连续**的只读调用。
+
+        ⚠️ 为什么只取开头连续的一段，而不是把所有只读的挑出来一起跑：
+        挑出来就**重排了执行顺序**。模型给出 [读, 写, 读] 时，
+        第二个读很可能是想看那次写的结果——把两个读并在一起先跑，
+        它读到的是写之前的世界。不报错，结果看起来完全正常。
+        """
+        group = []
+        for tu in tool_uses:
+            spec = self.registry.tools.get(tu.name)
+            if spec is None or not spec.read_only:
+                break
+            group.append(tu)
+        return group
+
+    async def _run_read_only_group(self, group: list, step: int, tr: Trace, step_span) -> None:
+        """并发执行一组只读调用，然后**按原顺序**写回上下文。
+
+        ⚠️ **写回顺序必须是模型给出的顺序，不是完成顺序。**
+        按完成顺序写回的话，同样的输入每次跑出来的上下文都不一样：
+        ① 不可复现，② 从第一个乱序的位置起 KV-cache 前缀全部失配（第 2 章 §2.5）。
+        并发是为了省时间，而按完成顺序写回会把省下的时间连本带利还给缓存未命中。
+        """
+        results = await asyncio.gather(
+            *[asyncio.to_thread(self.registry.call, tu.name, tu.input,
+                                allowed=self._allowed, confirmed=False)
+              for tu in group],
+            return_exceptions=True,
+        )
+        for tu, res in zip(group, results):          # ← 原顺序
+            with tr.span(tu.name, "tool_call", step_span) as ts:
+                ts.attrs["args"] = tu.input
+                ts.attrs["parallel_group"] = len(group)
+                if isinstance(res, BaseException):
+                    # 只读工具不该要求确认（要确认说明它有副作用，标错了）。
+                    # 真出了任何异常，也必须配一个 tool_result 回去。
+                    ts.error = f"{type(res).__name__}: {res}"[:120]
+                    self.ctx.append(Entry(
+                        role="user", content=f"工具执行失败：{res}",
+                        kind="error", step=step, tool_use_id=tu.id))
+                    continue
+                ts.attrs["result_chars"] = len(res.text)
+                ts.attrs["executed"] = True
+                if res.is_error:
+                    ts.error = res.text.splitlines()[0][:120]
+                key = None
+                if not res.is_error and len(res.text) >= self.stash_threshold_chars:
+                    key = self.ctx.stash(res.text, f"tool_{step}_{tu.id}_{tu.name}.txt")
+                    ts.attrs["stashed_to"] = key
+                self.ctx.append(Entry(
+                    role="user", content=res.text,
+                    kind="error" if res.is_error else "observation",
+                    step=step, tool_use_id=tu.id, retrieval_key=key))
+
+    async def _execute_tools(
         self, tool_uses: list, step: int, tr: Trace, step_span
     ) -> Outcome | None:
         """执行一批工具调用。返回 None 表示全部完成；返回 Outcome 表示中断。
 
         中断时会把**尚未执行的调用**存进 `_pending_calls`，
         因为上下文里已经写入了对应的 tool_use 块，它们必须拿到 tool_result。
+
+        一轮里模型可以给出多个 tool_use（并行工具调用是默认行为）。
+        API **不规定执行顺序**——并行还是串行是调用方的决定，
+        而这是一个**安全决定，不是性能决定**（第 5 章 §5.9）。
+
+        这里的策略：把开头**连续的只读调用**并发跑掉，其余一律串行。
         """
+        if self.parallel_tools:
+            group = self._leading_read_only(tool_uses)
+            if len(group) > 1:
+                await self._run_read_only_group(group, step, tr, step_span)
+                tool_uses = tool_uses[len(group):]
+
         for i, tu in enumerate(tool_uses):
             with tr.span(tu.name, "tool_call", step_span) as ts:
                 ts.attrs["args"] = tu.input
