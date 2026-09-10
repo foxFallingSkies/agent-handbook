@@ -7,6 +7,7 @@
     第 4 章  tools/                                           工具
     第 5 章  loop.py                                          编排与控制流
     第 7 章  memory.py                                        跨会话记忆
+    第11 章  reliability.py                                   无人值守可靠性
     第 9 章  trace.py                                         可观测
 
 跑通第 1 章那封邮件：
@@ -24,6 +25,10 @@ from .errors import (
 from .llm import FAST, SMART, LLM, Tier
 from .loop import Agent, Budget, Outcome
 from .memory import MemoryStore, dispatch as memory_dispatch
+from .reliability import (
+    AlreadyRunning, DeadLetter, Heartbeat, Ledger, Lease,
+    dedup_key, single_instance,
+)
 from .tools import ToolRegistry, ToolSpec
 from .trace import Trace
 from .transport import (
@@ -40,6 +45,8 @@ from .transport import (
 __all__ = [
     "Agent", "Budget", "Outcome",
     "MemoryStore", "memory_dispatch",
+    "AlreadyRunning", "DeadLetter", "Heartbeat", "Ledger", "Lease",
+    "dedup_key", "single_instance",
     "ContextManager", "Entry",
     "LLM", "Tier", "FAST", "SMART",
     "ToolRegistry", "ToolSpec",
