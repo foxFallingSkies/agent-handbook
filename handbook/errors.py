@@ -120,7 +120,9 @@ class ConfirmationRequired(HandbookError):
         # 手册第 11 章讲「静默失败比崩溃更危险」时会用这个真实案例。
         self.tool_args = tool_args
         # preview 必须是原始动作的展示，不是模型写的摘要。
-        # 理由见手册第 10 章（OWASP ASI09 人机信任利用）。
+        # 理由见手册第 10 章（OWASP ASI15 Human Manipulation）。
+        # ⚠️ 这里原来写的是 ASI09，那是错的 —— ASI09 是 Identity Spoofing。
+        # 引一个自己没核过的编号，比不引更糟。
         self.preview = preview
 
 

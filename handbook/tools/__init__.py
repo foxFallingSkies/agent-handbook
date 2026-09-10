@@ -284,8 +284,9 @@ class ToolRegistry:
     def _preview(spec: ToolSpec, args: dict) -> str:
         """给人看的确认预览。
 
-        ⚠️ 第 10 章（OWASP ASI09）：这里必须展示**原始动作**，
-        不能展示模型写的自然语言摘要——否则这道闸就是纸糊的。
+        ⚠️ 这里必须展示**原始动作**，不能展示模型写的自然语言摘要——
+        否则这道闸就是纸糊的：模型写"帮客户处理一下退款"，人点了同意，
+        实际执行的是别的。对应 OWASP ASI15「Human Manipulation」。
         """
         return (
             f"即将执行：{spec.name}\n"

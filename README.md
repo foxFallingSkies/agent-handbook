@@ -90,7 +90,7 @@ python -m examples.ch01_email          # 不需要 API key
 | `loop.py` | 第 5 章 | 五道闸（终止/预算/漂移/抖动/去重）；人工确认是显式重入 |
 | `memory.py` | 第 7 章 | Anthropic `memory_20250818` 工具的服务端；六个命令、路径穿越防护、按**访问**时间淘汰 |
 | `trace.py` | 第 9 章 | span 树，**压缩事件也是 span** |
-| `evals/` | 第 8 章 | golden set + pass@k / pass^k + 环境状态断言 |
+| `evals/` | 第 8 章 | golden set（23 条 · 13 条负例）+ pass@k / pass^k 的组合估计量 + 环境状态断言 |
 
 ```bash
 pytest                    # 42 个测试，每个对应书里的一条论断
