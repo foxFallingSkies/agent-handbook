@@ -86,7 +86,10 @@ class MemoryStore:
         字符串匹配挡不住符号链接，也挡不住 URL 编码。
         **用字符串匹配做路径安全是一个反复被攻破的模式。**
         """
-        if not isinstance(path, str) or not path.startswith(PREFIX):
+        # ⚠️ 必须带斜杠比。只判 startswith(PREFIX) 的话，
+        # "/memoriesX/a.txt" 会被切成 rel="X/a.txt" 落回根目录内，静默放行。
+        ok = isinstance(path, str) and (path == PREFIX or path.startswith(PREFIX + "/"))
+        if not ok:
             raise MemoryError(
                 f"路径必须以 {PREFIX} 开头，收到的是 {path!r}。",
                 hint=f"所有记忆文件都在 {PREFIX} 下，例如 {PREFIX}/notes.md。",
@@ -173,13 +176,19 @@ class MemoryStore:
             raise MemoryError(f"Error: The path {path} does not exist. "
                               f"Please provide a valid path.")
         text = p.read_text(encoding="utf-8")
-        hits = [i + 1 for i, line in enumerate(text.split("\n")) if old_str in line]
+        # ⚠️ 必须对**整段文本**数，不能按行判断"包含"。
+        # 按行判断有两个静默后果：多行 old_str 永远匹配不上（而官方语义是
+        # verbatim 子串）；同一行里出现两次会被当成"唯一"，默默改掉第一处——
+        # 而这正是下面那段代码声称要防的事。
+        n_hits = text.count(old_str)
+        hits = [text[:m].count("\n") + 1
+                for m in _find_all(text, old_str)] if n_hits else []
         if not hits:
             raise MemoryError(
                 f"No replacement was performed, old_str `{old_str}` "
                 f"did not appear verbatim in {path}."
             )
-        if len(hits) > 1:
+        if n_hits > 1:
             # 多处匹配必须拒绝，不能改第一处。
             # 改第一处等于让模型以为它改的是它想改的那处——静默的错。
             raise MemoryError(
@@ -323,6 +332,14 @@ def api_tool() -> dict:
 
 
 # ---------------------------------------------------------------------------
+
+
+def _find_all(text: str, sub: str):
+    """返回 sub 在 text 里全部出现位置。给 str_replace 报行号用。"""
+    i = text.find(sub)
+    while i != -1:
+        yield i
+        i = text.find(sub, i + 1)
 
 
 def _human_size(p: Path) -> str:

@@ -127,7 +127,7 @@ def _add_months(start: date, months: int) -> date:
     return date(y, m, min(start.day, monthrange(y, m)[1]))
 
 
-def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, SemanticIdMap]:
+def build_registry(shop: Shop, customer_id: str, workspace_root: str = "workspace") -> tuple[ToolRegistry, SemanticIdMap]:
     """为某一位客户构造工具集。
 
     注意 customer_id 是闭包捕获的，不是工具参数。
@@ -282,8 +282,11 @@ def build_registry(shop: Shop, customer_id: str) -> tuple[ToolRegistry, Semantic
         """
         from pathlib import Path as _P
         f = _P(path)
-        # 路径必须落在 workspace 内：path 来自模型，是可控输入
-        root = _P("workspace").resolve()
+        # 路径必须落在记忆根目录内：path 来自模型，是可控输入。
+        # ⚠️ 根目录必须是**传进来的那个**，不能硬编码相对路径 "workspace"——
+        # ContextManager 的 workspace 可以是任意路径，而且 cwd 一变就全错。
+        # 和 customer_id 一个待遇：闭包捕获，不靠调用点记得传。
+        root = _P(workspace_root).resolve()
         try:
             resolved = f.resolve()
             resolved.relative_to(root)

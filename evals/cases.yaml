@@ -275,13 +275,33 @@
   steps:
     - call: check_warranty
       args: {order: order-0803}
-      assert_contains: ["items", "SKU-CM-820"]
+      assert_contains: ["SKU-CM-820", "SKU-FL-200", "该品类不提供保修", "covered_until"]
   notes: |
     原实现只看 items[0]。一张订单里既可能有 12 个月保修的机器，也可能有
     0 个月的耗材——只看第一件，等于把保修判定押在数组顺序上，
     而数组顺序不是业务事实。
 
 # ---- 检索与语义 ID ----
+
+- id: tool-month-end-warranty-not-shortened
+  difficulty: hard
+  category: correctness
+  kind: tool
+  steps:
+    - call: check_warranty
+      args: {order: order-0828}
+      assert_contains: ["2027-08-31"]
+      assert_not_contains: ["2027-08-28"]
+  notes: |
+    ⚠️ 这条用例的**数据**比断言更重要。
+
+    原来 shop.json 里的 delivered_at 只有 06 / 14 / 28 三个日子，
+    而 `min(day, 28)` 和正确实现在这三个值上**算出来完全一样**——
+    于是那条写着「不钉日期就发现不了」的用例，钉了日期也发现不了。
+
+    加一笔 8-31 签收的订单之后它才真的能红。
+    🔑 一般规律：**断言只能在数据能区分两种实现的地方起作用。**
+    写完一条用例要多问一句：我的夹具数据，让这条断言有机会失败吗？
 
 - id: tool-semantic-id-resolves
   difficulty: easy

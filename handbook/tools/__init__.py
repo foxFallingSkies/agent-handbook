@@ -231,7 +231,18 @@ class ToolRegistry:
         # 而这种事发生在生产里、发生在半夜、发生在你没加分页的那个工具上。
         from .. import tokens as _tk
         if _tk.estimate(text) > self.max_response_tokens:
-            keep = self.max_response_tokens * 4      # 粗略换算回字符
+            # ⚠️ 不能用「token × 4」换算回字符——那只对拉丁文成立。
+            # 同目录的 tokens.py 自己写着中文约 1.5 token/字符，
+            # 于是 4 字符/token 的截断在中文内容上会超出上限约 6 倍。
+            # 直接二分收敛到真实估算值以内。
+            lo, hi = 0, len(text)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if _tk.estimate(text[:mid]) <= self.max_response_tokens:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            keep = lo
             text = (
                 text[:keep]
                 + f"\n\n[结果过长已被截断：完整内容约 {_tk.estimate(text)} tokens，"

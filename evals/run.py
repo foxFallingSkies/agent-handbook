@@ -177,10 +177,14 @@ async def main(k: int, live: bool) -> int:
                 notes.append(note)
 
         n = len(results)
-        passed = sum(results)
-        pass_at_k = 1.0 if passed else 0.0        # k 次里至少一次成功
-        pass_pow_k = passed / n if n else 0.0     # 这里等于全过的比例
-        rows.append((case["id"], passed, n, pass_at_k, pass_pow_k, notes[:1]))
+        c = sum(results)
+        # ⚠️ 必须调上面那两个函数。这里一度是局部变量 `pass_pow_k = passed / n`，
+        # 它把同名函数遮蔽掉了 —— 表头写着 pass^k，打出来的是平均成功率。
+        # 两个正确的估计量成了死代码，而且**没有任何测试会红**：
+        # 这个 bug 是靠一次变异测试才被抓出来的，不是靠跑测试。
+        kk = min(k, n)                            # 工具层 n=1，k 取不到那么大
+        rows.append((case["id"], c, n,
+                     pass_at_k(n, c, kk), pass_pow_k(n, c, kk), notes[:1]))
 
     if not rows:
         print("golden set 为空")

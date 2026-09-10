@@ -33,8 +33,17 @@
           "price_cny": 1899.0,
           "category": "small_appliance",
           "warranty_months": 12
+        },
+        {
+          "sku": "SKU-FL-200",
+          "name": "咖啡机滤纸 200 张",
+          "qty": 1,
+          "price_cny": 39.0,
+          "category": "consumable",
+          "warranty_months": 0
         }
-      ]
+      ],
+      "_why": "刻意做成多商品：一件 12 个月保修的机器 + 一件 0 个月的耗材。只看 items[0] 的实现在单商品订单上永远是对的，所以那条「逐件算」的用例原本抓不住它。"
     },
     {
       "id": "ord_20260812_9de1",
@@ -90,6 +99,25 @@
         }
       ],
       "_why": "在途订单。用来测「保修期还没起算」——它和「不保修」是两回事，而原实现会在这里 date.fromisoformat(None) 抛 TypeError。必须挂在**当前客户**名下，否则会先被语义 ID 映射挡掉，那条用例就只是在重复测越权。"
+    },
+    {
+      "id": "ord_20260831_e5b2",
+      "customer_id": "cust_7f3a91e2",
+      "placed_at": "2026-08-28",
+      "delivered_at": "2026-08-31",
+      "status": "delivered",
+      "total_cny": 899.0,
+      "items": [
+        {
+          "sku": "SKU-BL-500",
+          "name": "破壁机 BL-500",
+          "qty": 1,
+          "price_cny": 899.0,
+          "category": "small_appliance",
+          "warranty_months": 12
+        }
+      ],
+      "_why": "月末签收。用来钉死 min(delivered.day, 28) 那个 bug——原来数据里的日期是 06/14/28，min(day,28) 和正确实现算出来一样，所以那条「钉死日期」的用例其实抓不住它。8-31 + 12 个月 = 2027-08-31。"
     },
     {
       "id": "ord_20260901_1122",

@@ -310,7 +310,14 @@ class Agent:
                 # 就只是一句口号。钥匙必须在这里被真正写进去。
                 key = None
                 if not res.is_error and len(res.text) >= self.stash_threshold_chars:
-                    key = self.ctx.stash(res.text, f"tool_{step}_{tu.name}.txt")
+                    # ⚠️ 文件名必须带上 tool_use 的 id。
+                    # 只用 step+工具名的话，模型在同一轮里并行调两次
+                    # search_orders（不同参数，完全合法）会互相覆盖：
+                    # 两条 observation 拿到同一把钥匙，read_stashed 取回的
+                    # 是第二次的结果。不报错、不变红，正好击穿第 3 章
+                    # 那句「因为有钥匙所以无损」。
+                    key = self.ctx.stash(
+                        res.text, f"tool_{step}_{tu.id}_{tu.name}.txt")
                     ts.attrs["stashed_to"] = key
 
                 # 失败也要配一个 tool_result 回去，只是标成 error：

@@ -461,3 +461,34 @@ def test_capability_can_be_narrowed_after_reading_untrusted_content():
     assert shop.tickets == []
     # 定义仍在，前缀没变
     assert "create_repair_ticket" in [t["name"] for t in reg.api_tools()]
+
+
+def test_eval_runner_actually_calls_the_combinatorial_estimators():
+    """⚠️ 这条测试的存在，是因为同一个 bug 犯过两次。
+
+    第一次：`pass^k` 写成 `passed / n`（平均成功率）。
+    第二次：改成调 `pass_pow_k()` 的那次编辑**静默失败了**——替换的锚点没匹配上，
+    旧代码原样留着，而我在书里、台账里都写了"已修复"。
+
+    两次都没有任何测试变红，因为没有任何测试碰过那一行。
+    它最后是靠一次变异测试被抓出来的。
+
+    所以这条断言直接钉住"报表里那个数是不是组合估计量"：
+    n=3、c=2 时，平均成功率是 0.67，而 pass^3 是 0.00。
+    """
+    import inspect
+    from evals import run as R
+
+    # ① 两个估计量本身是对的
+    assert R.pass_pow_k(3, 2, 3) == 0.0          # 三次里对两次 → 三次全对的概率是 0
+    assert abs(R.pass_at_k(3, 2, 3) - 1.0) < 1e-9
+    assert R.pass_pow_k(10, 8, 1) == 0.8         # k=1 时才等于 c/n
+
+    # ② main() 真的在调它们，而不是被同名局部变量遮蔽
+    # ⚠️ 要剥掉注释再查。第一版断言没剥，而我写的那句注释里恰好含有
+    # 被禁的那个字符串——于是断言在**正确的代码上**也红。
+    # 「检查器把自己的说明文字当成了被检查的内容」是同一类错的第三个形态。
+    src = "\n".join(l.split("#")[0] for l in inspect.getsource(R.main).splitlines())
+    assert "pass_pow_k(n, c" in src, "报表没有调用 pass_pow_k()——它又被遮蔽了"
+    assert "pass_at_k(n, c" in src, "报表没有调用 pass_at_k()"
+    assert "passed / n" not in src, "报表里还在用平均成功率冒充 pass^k"
