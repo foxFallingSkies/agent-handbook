@@ -260,7 +260,8 @@ def test_high_risk_tool_requires_confirmation():
         reg.call("create_repair_ticket",
                  {"order": "order-0803", "symptom": "坏了", "warranty_claim": True})
     assert shop.tickets == []                       # 没确认就没有副作用
-    # 预览必须是**原始动作**，不是摘要（OWASP ASI09）
+    # 预览必须是**原始动作**，不是摘要。
+    # OWASP ASI09 Human-Agent Trust Exploitation（2026 定稿版编号）。
     assert "order-0803" in ei.value.preview
     assert "warranty_claim" in ei.value.preview
 

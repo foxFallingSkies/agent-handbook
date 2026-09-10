@@ -98,7 +98,8 @@ async def main(live: bool) -> int:
         print("=" * 68)
         print("⏸  需要人工确认")
         print("=" * 68)
-        # ⚠️ 展示的是**原始动作**，不是 agent 写的摘要（OWASP ASI09）
+        # ⚠️ 展示的是**原始动作**，不是 agent 写的摘要。
+        # OWASP ASI09 Human-Agent Trust Exploitation（2026 定稿版）。
         print(c.preview)
         print("=" * 68)
         print("[演示：自动批准]\n")
