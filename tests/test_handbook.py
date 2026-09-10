@@ -550,3 +550,62 @@ def test_message_serialization_preserves_prefix():
     # 改写中间一条 → 从那里起不再是前缀（这正是滚动折叠干的事）
     folded = [dict(a[0], content="[已折叠]")] + b[1:]
     assert not tk.serialize_messages(folded).startswith(tk.serialize_messages(a))
+
+
+# ---------------------------------------------------------------- 两个开关
+
+
+@pytest.mark.asyncio
+async def test_cache_messages_off_stops_history_from_being_cached():
+    """`LLM(cache_messages=False)` 必须真的把历史那段的断点撤掉。
+
+    ⚠️ 判据不是「命中率变低」——静态前缀（system/tools）的断点还在，
+    命中率不会归零。判据是**历史增长时可命中量不再跟着涨**。
+    上面那条 test_history_is_a_growing_cacheable_prefix 是它的正面，
+    两条一起才把「断点标在最后一条消息上」这件事钉死。
+    """
+    def run(cache: bool):
+        script = [Response(text="ok", stop_reason="end_turn", usage=Usage(output_tokens=5))
+                  for _ in range(4)]
+        return LLM(ScriptedTransport(script), cache_messages=cache)
+
+    async def seq(llm):
+        big = "你是客服。" * 400
+        history: list[dict] = []
+        out = []
+        for i in range(4):
+            history = history + [{"role": "user", "content": f"问题 {i} " + "详情" * 60},
+                                 {"role": "assistant", "content": "好的"}]
+            r = await llm.call(system=big, messages=history)
+            out.append(r.usage.cache_read_input_tokens)
+        return out
+
+    on = await seq(run(True))
+    off = await seq(run(False))
+
+    assert all(a < b for a, b in zip(on[1:], on[2:])), on      # 开：跟着历史涨
+    assert len(set(off[1:])) == 1, off                          # 关：卡在静态前缀上不动
+    assert off[-1] < on[-1]
+
+
+def test_fold_can_be_turned_off():
+    """`ContextManager(fold=False)` 必须真的一条都不折。
+
+    ⚠️ 这个开关不是给生产用的，是给第 3 章 §3.1 那张对比表用的：
+    结论「折叠省 token 但砸缓存」如果读者复现不了，它就只是作者的一句断言。
+    """
+    from handbook.context import ContextManager, Entry
+
+    def build(fold: bool):
+        ctx = ContextManager(workspace="workspace/_t_fold", fold=fold)
+        for step in range(6):
+            ctx.step = step
+            ctx.append(Entry(role="user", content="工具结果 " * 200,
+                             kind="observation", step=step,
+                             retrieval_key="workspace/x.txt"))
+        return ctx
+
+    assert build(True).stats()["folded"] > 0
+    assert build(False).stats()["folded"] == 0
+    # 不折叠 = 占的窗口更大。这正是那张表里「多 12% token」的来源
+    assert build(False).used_tokens() > build(True).used_tokens()

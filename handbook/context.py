@@ -136,12 +136,17 @@ class ContextManager:
         self,
         *,
         window: int = 200_000,
+        fold: bool = True,
         fold_after_steps: int = 2,
         emergency_at: float = 0.85,
         summarize: Callable[[list[Entry]], str] = default_summarizer,
         workspace: str | Path = "workspace",
     ):
         self.window = window
+        # ⚠️ 折叠可关，是因为第 3 章 §3.1 那条判断需要读者自己跑一遍才能信：
+        # 折叠省 token，但它改写历史中段，会把 KV-cache 的前缀从那一点作废。
+        # 两个开关都在，那张对比表才是可复现的，而不是「作者说的」。
+        self.fold_enabled = fold
         self.fold_after_steps = fold_after_steps
         self.emergency_at = emergency_at
         self.summarize = summarize
@@ -191,6 +196,8 @@ class ContextManager:
         就不再影响任何判断——而它恰恰是那个只有 loop 会写、ContextManager
         却拿它做决策的字段。这类跨层的隐式约定正是上面那个 bug 的成因。
         """
+        if not self.fold_enabled:
+            return
         folded_tokens = 0
         for e in self.entries:
             if e.folded or e.kind != "observation":

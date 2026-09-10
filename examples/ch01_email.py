@@ -64,7 +64,7 @@ def verify_outcome(shop: Shop):
     return _verify
 
 
-async def main(live: bool) -> int:
+async def main(live: bool, fold: bool = True, cache: bool = True) -> int:
     shop = Shop()
     customer_id = "cust_7f3a91e2"
     registry, _ids = build_registry(shop, customer_id)
@@ -80,14 +80,17 @@ async def main(live: bool) -> int:
         transport = ScriptedTransport(SCRIPT)
         print("模式：OFFLINE（脚本化响应；token 数为本地估算，非实测）\n")
 
-    llm = LLM(transport)
+    llm = LLM(transport, cache_messages=cache)
     agent = Agent(
         llm=llm,
         registry=registry,
         system=SYSTEM,
         budget=Budget(max_steps=15),
         verify=verify_outcome(shop),
+        fold=fold,
     )
+    if not (fold and cache):
+        print(f"开关：折叠={'开' if fold else '关'}  缓存={'开' if cache else '关'}\n")
 
     trace = Trace("处理客户来信")
     outcome = await agent.run(EMAIL, trace=trace)
@@ -162,5 +165,10 @@ async def main(live: bool) -> int:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="真实 API 调用")
+    ap.add_argument("--no-fold", action="store_true",
+                    help="关掉滚动折叠（第 3 章 §3.1 那张对比表的另一半）")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="关掉 KV-cache 断点（第 9 章那笔账的另一半）")
     args = ap.parse_args()
-    raise SystemExit(asyncio.run(main(args.live)))
+    raise SystemExit(asyncio.run(main(args.live, fold=not args.no_fold,
+                                      cache=not args.no_cache)))

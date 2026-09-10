@@ -24,6 +24,16 @@ from .errors import (
 )
 from .llm import FAST, SMART, LLM, Tier
 from .loop import Agent, Budget, Outcome
+from .retrieval import (
+    BM25Retriever,
+    Doc,
+    Hit,
+    VectorRetriever,
+    evaluate,
+    recall_at_k,
+    rrf_fuse,
+    tokenize,
+)
 from .memory import MemoryStore, dispatch as memory_dispatch
 from .reliability import (
     AlreadyRunning, DeadLetter, Heartbeat, Ledger, Lease,
@@ -45,6 +55,8 @@ from .transport import (
 __all__ = [
     "Agent", "Budget", "Outcome",
     "MemoryStore", "memory_dispatch",
+    "BM25Retriever", "VectorRetriever", "Doc", "Hit",
+    "rrf_fuse", "recall_at_k", "evaluate", "tokenize",
     "AlreadyRunning", "DeadLetter", "Heartbeat", "Ledger", "Lease",
     "dedup_key", "single_instance",
     "ContextManager", "Entry",

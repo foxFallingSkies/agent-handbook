@@ -75,6 +75,7 @@ class Agent:
         tier: Tier | None = None,
         verify: Verifier | None = None,
         workspace: str = "workspace",
+        fold: bool = True,
         state_probe: Callable[[], Any] | None = None,
         drift_check: Callable[[str, list[str]], bool] | None = None,
         stash_threshold_chars: int = 400,
@@ -85,7 +86,7 @@ class Agent:
         self.budget = budget or Budget()
         self.tier = tier
         self.verify = verify
-        self.ctx = ContextManager(workspace=workspace)
+        self.ctx = ContextManager(workspace=workspace, fold=fold)
         self.stash_threshold_chars = stash_threshold_chars
 
         # 闸 5 用：把「环境现在什么样」映射成一个可比较的值。

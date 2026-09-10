@@ -85,12 +85,16 @@ class LLM:
         fallback_tier: Tier | None = FAST,
         max_retries: int = 3,
         max_repairs: int = 2,
+        cache_messages: bool = True,
     ):
         self.transport = transport
         self.default_tier = default_tier
         self.fallback_tier = fallback_tier
         self.max_retries = max_retries
         self.max_repairs = max_repairs
+        # ⚠️ 关掉它并不会「省一点」，而是让整段历史每一步都按全价重算。
+        # 留这个开关只有一个用途：让第 9 章那笔账能被读者自己复现一遍。
+        self.cache_messages = cache_messages
         self.records: list[CallRecord] = []
 
     # ------------------------------------------------------------------
@@ -115,6 +119,7 @@ class LLM:
             messages=messages,
             max_tokens=tier.max_tokens,
             temperature=temperature,
+            cache_messages=self.cache_messages,
         )
         resp, retries, used = await self._send_with_retry(req, tier)
         # 记 used 而不是 tier：降级之后这笔钱是花在便宜档上的，
@@ -163,6 +168,7 @@ class LLM:
                 messages=attempt_messages,
                 max_tokens=tier.max_tokens,
                 temperature=0.0,
+                cache_messages=self.cache_messages,
             )
             resp, retries, used = await self._send_with_retry(req, tier)
             total_retries += retries
@@ -241,6 +247,7 @@ class LLM:
                 messages=req.messages,
                 max_tokens=min(req.max_tokens, self.fallback_tier.max_tokens),
                 temperature=req.temperature,
+                cache_messages=req.cache_messages,
             )
             try:
                 return (await self.transport.send(fb), self.max_retries,

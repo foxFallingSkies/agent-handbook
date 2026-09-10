@@ -1,0 +1,118 @@
+{
+  "_note": "手册第 6 章 §6.9 那个「20 个真实问题 + 人工标注」的最小评测集。relevant 是人标的，不是模型标的。",
+  "cases": [
+    {
+      "id": "q01",
+      "query": "延保是不是在原保修到期后再加一年",
+      "relevant": [
+        "pol_warranty_ext",
+        "faq_ext_calc"
+      ]
+    },
+    {
+      "id": "q02",
+      "query": "优惠券能抵维修费吗",
+      "relevant": [
+        "pol_coupon",
+        "faq_coupon_repair"
+      ]
+    },
+    {
+      "id": "q03",
+      "query": "ord_20260803_a17c 这个号是什么意思",
+      "relevant": [
+        "faq_ordid"
+      ]
+    },
+    {
+      "id": "q04",
+      "query": "TCK-0001 查不到订单",
+      "relevant": [
+        "faq_tck",
+        "faq_ordid"
+      ]
+    },
+    {
+      "id": "q05",
+      "query": "咖啡机漏水算不算质量问题",
+      "relevant": [
+        "faq_coffee",
+        "pol_warranty_std"
+      ]
+    },
+    {
+      "id": "q06",
+      "query": "机器沾了水还能保修吗",
+      "relevant": [
+        "faq_liquid",
+        "pol_warranty_std"
+      ]
+    },
+    {
+      "id": "q07",
+      "query": "换了新机保修重新算吗",
+      "relevant": [
+        "pol_exchange"
+      ]
+    },
+    {
+      "id": "q08",
+      "query": "退款迟迟没到账",
+      "relevant": [
+        "faq_refund_time",
+        "pol_return"
+      ]
+    },
+    {
+      "id": "q09",
+      "query": "东西不想要了能退吗",
+      "relevant": [
+        "pol_return"
+      ]
+    },
+    {
+      "id": "q10",
+      "query": "维修要等多久",
+      "relevant": [
+        "pol_repair_flow",
+        "faq_holiday"
+      ]
+    },
+    {
+      "id": "q11",
+      "query": "发票抬头写错了",
+      "relevant": [
+        "pol_invoice"
+      ]
+    },
+    {
+      "id": "q12",
+      "query": "买完就降价了",
+      "relevant": [
+        "faq_price_protect"
+      ]
+    },
+    {
+      "id": "q13",
+      "query": "客服说过的话你们还留着吗",
+      "relevant": [
+        "pol_privacy"
+      ]
+    },
+    {
+      "id": "q14",
+      "query": "冰箱能送到楼上吗",
+      "relevant": [
+        "faq_upstairs"
+      ]
+    },
+    {
+      "id": "q15",
+      "query": "上个月买的那个东西坏了怎么查是哪一单",
+      "relevant": [
+        "faq_multi_order",
+        "faq_ordid"
+      ]
+    }
+  ]
+}

@@ -89,6 +89,7 @@ python -m examples.ch01_email          # 不需要 API key
 | `tools/` | 第 4 章 | 错误消息是 prompt；语义化 ID；风险分级；**遮蔽而非删除**；参数校验即防呆 |
 | `loop.py` | 第 5 章 | 五道闸（终止/预算/漂移/抖动/去重）；人工确认是显式重入 |
 | `memory.py` | 第 7 章 | Anthropic `memory_20250818` 工具的服务端；六个命令、路径穿越防护、按**访问**时间淘汰 |
+| `retrieval.py` | 第 6 章 | BM25（中文字符 bigram）· RRF 融合（**只用排名不用分数**）· recall@k 是天花板；⚠️ 自带的向量检索是词袋不是语义，写在 docstring 里 |
 | `reliability.py` | 第 11 章 | 单例 flock · 租约 · append-once 去重台账 · 死信 · **带进度的心跳**（只报时间的心跳在卡死时照样跳） |
 | `trace.py` | 第 9 章 | span 树，**压缩事件也是 span** |
 | `evals/` | 第 8 章 | golden set（23 条 · 13 条负例）+ pass@k / pass^k 的组合估计量 + 环境状态断言 |
