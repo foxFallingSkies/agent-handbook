@@ -92,16 +92,26 @@ async def test_stable_prefix_hits_cache():
 
     stable = LLM(ScriptedTransport(script[:3]))
     big_system = "你是客服。" * 400          # 超过最小可缓存长度
+    # ⚠️ 消息必须**只追加**，不能每次换一条。
+    # 初版这里三次分别发 q0 / q1 / q2——那三次互相不是前缀，
+    # 而真实 agent 的历史是 append-only 的。初版之所以还能通过，
+    # 是因为当时的模拟器把「前缀」定义成只有 system+tools，
+    # 消息整段按全价算——也就是说它测的不是缓存，是 system 有没有变。
+    history: list[dict] = []
     for i in range(3):
-        await stable.call(system=big_system,
-                          messages=[{"role": "user", "content": f"q{i}"}])
+        history = history + [{"role": "user", "content": f"q{i}"},
+                             {"role": "assistant", "content": "ok"}]
+        await stable.call(system=big_system, messages=history)
     assert stable.cost_report()["cache_hit_rate"] > 0.5
 
     churning = LLM(ScriptedTransport(script[3:]))
+    history = []
     for i in range(3):
         # 只多了一个时间戳——这一个改动就让整段前缀作废
+        history = history + [{"role": "user", "content": f"q{i}"},
+                             {"role": "assistant", "content": "ok"}]
         await churning.call(system=f"[时间 2026-09-09 10:0{i}:00]" + big_system,
-                            messages=[{"role": "user", "content": f"q{i}"}])
+                            messages=history)
     assert churning.cost_report()["cache_hit_rate"] == 0.0
 
 
@@ -493,3 +503,50 @@ def test_eval_runner_actually_calls_the_combinatorial_estimators():
     assert "pass_pow_k(n, c" in src, "报表没有调用 pass_pow_k()——它又被遮蔽了"
     assert "pass_at_k(n, c" in src, "报表没有调用 pass_at_k()"
     assert "passed / n" not in src, "报表里还在用平均成功率冒充 pass^k"
+
+
+@pytest.mark.asyncio
+async def test_history_is_a_growing_cacheable_prefix():
+    """§2.5 / §3.1：append-only 的历史**本身就是可缓存的增长前缀**。
+
+    ⚠️ 这条推翻了本书上一版第 3 章开头那句话：
+    「这一项没法靠缓存解决，因为历史每一步都在变，天然不是稳定前缀」。
+
+    历史是只追加的，第 k 步的整段历史正好是第 k+1 步的前缀。
+    只要每步把断点挪到最后一条消息上，缓存量就会**跟着历史一起涨**。
+    """
+    script = [Response(text="ok", stop_reason="end_turn", usage=Usage(output_tokens=5))
+              for _ in range(4)]
+    llm = LLM(ScriptedTransport(script))
+    big = "你是客服。" * 400
+    history: list[dict] = []
+    cached_seq = []
+    for i in range(4):
+        history = history + [{"role": "user", "content": f"问题 {i} " + "详情" * 60},
+                             {"role": "assistant", "content": "好的"}]
+        r = await llm.call(system=big, messages=history)
+        cached_seq.append(r.usage.cache_read_input_tokens)
+
+    # 第一次没有可命中的前缀；之后每一次的可命中量都严格增长
+    assert cached_seq[0] == 0
+    assert all(a < b for a, b in zip(cached_seq[1:], cached_seq[2:])), cached_seq
+
+
+def test_message_serialization_preserves_prefix():
+    """serialize_messages 必须保前缀，否则缓存判定整段失配。
+
+    ⚠️ 不能用 json.dumps(整个数组)：第一条消息的末尾在只有一条时是 `}]`，
+    有两条时是 `},` ——差一个字符，从那里往后全部对不上。
+    这个 bug 的表现是「缓存命中率莫名其妙一直是 0」。
+    """
+    from handbook import tokens as tk
+
+    a = [{"role": "user", "content": "x" * 100}]
+    b = a + [{"role": "assistant", "content": "y" * 50}]
+    c = b + [{"role": "user", "content": "z" * 30}]
+    assert tk.serialize_messages(b).startswith(tk.serialize_messages(a))
+    assert tk.serialize_messages(c).startswith(tk.serialize_messages(b))
+
+    # 改写中间一条 → 从那里起不再是前缀（这正是滚动折叠干的事）
+    folded = [dict(a[0], content="[已折叠]")] + b[1:]
+    assert not tk.serialize_messages(folded).startswith(tk.serialize_messages(a))

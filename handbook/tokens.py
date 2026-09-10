@@ -61,6 +61,26 @@ def estimate(text: str) -> int:
     ) + 1
 
 
+def serialize_messages(messages: list) -> str:
+    """把 messages 拍成一个**保前缀**的字符串，用来判断缓存能命中多少。
+
+    ⚠️ 不能用 json.dumps(messages)。数组的 JSON 表示不保前缀：
+    第一条消息末尾在只有一条时是 `}]`，在有两条时是 `},` ——
+    差一个字符，前缀判定就整段失配。真实 API 是按 **token 序列**
+    做前缀匹配的，而 token 序列天然是逐条拼接的。
+
+    所以这里逐条序列化再拼接：追加一条消息 = 在末尾追加一段，
+    前面那一整段一个字节都不动。
+
+    ⚠️ 每条内部仍然 sort_keys —— 和 Request.fingerprint 同一个理由：
+    键顺序一变，那一条的表示就变了，从它往后全部失配。
+    """
+    import json
+    return "".join(
+        json.dumps(m, sort_keys=True, ensure_ascii=False) for m in messages
+    )
+
+
 def estimate_messages(messages: list[dict]) -> int:
     """估算一组消息的 token 数，含每条消息的固定开销。"""
     total = 0

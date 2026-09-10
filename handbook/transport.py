@@ -83,6 +83,13 @@ class Request:
     temperature: float = 0.0
     cache_system: bool = True      # 在 system 末尾标缓存断点
     cache_tools: bool = True       # 在工具定义末尾标缓存断点
+    cache_messages: bool = True    # ⭐ 在**最后一条消息**末尾也标一个断点
+    #
+    # ⚠️ 第三个才是 agent 场景里最值钱的那个，而它最容易被漏掉。
+    # 直觉上「历史每一步都在变，所以不是稳定前缀」——这个直觉是错的：
+    # 历史是 append-only 的，第 k 步的整段历史**正好是**第 k+1 步的前缀。
+    # 只标 system+tools 的话，缓存量会永远冻结在那几千 token 上，
+    # 而真正二次增长的那部分（累积的工具结果）每一步都按全价重发。
 
     def fingerprint(self) -> str:
         """用于 Replay 查找的稳定指纹。
@@ -182,6 +189,32 @@ def _build_system_blocks(req: Request) -> list[dict]:
     return [block]
 
 
+def _build_messages(req: Request) -> list[dict]:
+    """把断点标在**最后一条消息**上。
+
+    前缀匹配是累积的，所以标在末尾 = 把「system + 工具 + 至此为止的全部历史」
+    整段纳入缓存。下一步再标到新的末尾，上一步那一整段就是命中的部分。
+
+    ⚠️ 只能标在最后一条上。往中间标没有意义（前缀匹配从头开始），
+    而且断点总数有上限（CACHE_MAX_BREAKPOINTS = 4）。
+    """
+    msgs = [dict(m) for m in req.messages]
+    if not req.cache_messages or not msgs:
+        return msgs
+
+    last = msgs[-1]
+    content = last.get("content")
+    if isinstance(content, str):
+        # 字符串形式要先转成 block，才能挂 cache_control
+        last["content"] = [{"type": "text", "text": content,
+                            "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(content, list) and content:
+        blocks = [dict(b) for b in content]
+        blocks[-1]["cache_control"] = {"type": "ephemeral"}
+        last["content"] = blocks
+    return msgs
+
+
 def _build_tools(req: Request) -> list[dict]:
     """工具定义。缓存断点标在**最后一个**工具上——前缀匹配是累积的，
     标在末尾等于把"system + 全部工具"这一整段都纳入缓存。
@@ -197,6 +230,7 @@ def _build_tools(req: Request) -> list[dict]:
     # 它只会在第一次真实调用时炸，而那时你正在演示。
     used = sum(1 for t in tools if "cache_control" in t)
     used += 1 if req.cache_system else 0
+    used += 1 if req.cache_messages else 0
     if used > CACHE_MAX_BREAKPOINTS:
         raise BadRequestError(
             f"标了 {used} 个缓存断点，超过上限 {CACHE_MAX_BREAKPOINTS}。",
@@ -252,7 +286,7 @@ class AnthropicTransport:
                     temperature=req.temperature,
                     system=_build_system_blocks(req),
                     tools=_build_tools(req) or None,
-                    messages=req.messages,
+                    messages=_build_messages(req),
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -393,6 +427,7 @@ class ScriptedTransport:
         self.requests: list[Request] = []
         self.estimate_usage = estimate_usage
         self._prev_prefix: str | None = None
+        self._prev_tokens: int = 0
 
     async def send(self, req: Request) -> Response:
         self.requests.append(req)
@@ -414,19 +449,34 @@ class ScriptedTransport:
         if self.estimate_usage:
             from . import tokens as tk
 
-            prefix = req.system + json.dumps(req.tools, sort_keys=True, ensure_ascii=False)
-            prefix_tokens = tk.estimate(prefix)
-            msg_tokens = tk.estimate_messages(req.messages)
+            # 真实 API 按 token 前缀**累积**匹配，而缓存断点标在最后一条消息上，
+            # 所以「上一次发过的整段内容」都是这一次的可命中前缀。
+            #
+            # ⚠️ 初版这里把 prefix 定义成只有 system+tools，历史整段算全价。
+            # 那正是第 3 章那句「历史没法靠缓存解决」的来源——而它是错的：
+            # 历史是 append-only 的，上一步的整段就是这一步的前缀。
+            static = req.system + json.dumps(req.tools, sort_keys=True,
+                                             ensure_ascii=False)
+            whole = static + tk.serialize_messages(req.messages)
+            whole_tokens = tk.estimate(static) + tk.estimate_messages(req.messages)
 
-            # 前缀没变 → 算作缓存命中；变了 → 算作写入
-            if self._prev_prefix == prefix and prefix_tokens >= CACHE_MIN_TOKENS:
-                cached, created, fresh = prefix_tokens, 0, msg_tokens
-            elif prefix_tokens >= CACHE_MIN_TOKENS:
-                cached, created, fresh = 0, prefix_tokens, msg_tokens
+            prev = self._prev_prefix or ""
+            if prev and whole.startswith(prev):
+                # 上一次发过的那一段命中；只有新增的部分按全价
+                cached = self._prev_tokens
+                fresh = whole_tokens - cached
+                created = fresh if req.cache_messages else 0
+            elif whole_tokens >= CACHE_MIN_TOKENS:
+                cached, created, fresh = 0, whole_tokens, 0
             else:
-                # 前缀太短，静默不缓存——这是真实 API 的行为
-                cached, created, fresh = 0, 0, prefix_tokens + msg_tokens
-            self._prev_prefix = prefix
+                # 太短，静默不缓存——这是真实 API 的行为
+                cached, created, fresh = 0, 0, whole_tokens
+
+            if cached and cached < CACHE_MIN_TOKENS:
+                cached, fresh, created = 0, whole_tokens, 0
+
+            self._prev_prefix = whole
+            self._prev_tokens = whole_tokens if req.cache_messages else tk.estimate(static)
 
             resp.usage.input_tokens = fresh
             resp.usage.cache_read_input_tokens = cached
